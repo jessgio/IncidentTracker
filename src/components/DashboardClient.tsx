@@ -674,11 +674,19 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
                             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sStyle.dot}`} />
                             {inc.status}
                           </div>
-                          <select value={inc.status} onChange={(e) => updateStatus(inc.id, e.target.value)}
-                            className="absolute inset-0 opacity-0 w-full cursor-pointer">
-                            <option>Not Started</option>
-                            <option>In Progress</option>
-                            <option>Completed</option>
+                          <select 
+                            value={inc.status} 
+                            onChange={(e) => {
+                              // Prevent click from bubbling to the row
+                              e.stopPropagation();
+                              updateStatus(inc.id, e.target.value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute inset-0 opacity-0 w-full cursor-pointer text-slate-900"
+                          >
+                            <option value="Not Started">Not Started</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Completed">Completed</option>
                           </select>
                         </div>
                       </td>

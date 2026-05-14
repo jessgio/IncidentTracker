@@ -16,7 +16,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function GET() {
   try {
-    // 1. Calculate Timestamps (Fixed variable names!)
+    // 1. Calculate Timestamps
     const today = new Date()
     const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)
     const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000)
@@ -48,7 +48,7 @@ export async function GET() {
       percentage: Math.round((count / currentIncidents.length) * 100) || 0
     }))
 
-    // 4. Generate AI Analysis
+    // 4. Generate AI Analysis (Bilingual)
     const promptData = {
       thisWeekTotal: currentIncidents.length,
       lastWeekTotal: priorCount,
@@ -57,11 +57,21 @@ export async function GET() {
     }
 
     const aiRes = await ai.chat.completions.create({
-      model: 'openai/gpt-4o',
+      model: 'google/gemini-2.0-flash-001',
       messages: [
         {
           role: 'system',
-          content: 'You are an expert operations analyst. Analyze the weekly customer service incident data. Write a 3 paragraph executive summary in HTML format (use <p>, <strong>, and <ul>). Address: 1. Are things improving? 2. Which marketplace has the most issues and why? 3. Provide 2 actionable insights.'
+          content: `You are an expert operations analyst. Analyze the weekly customer service incident data. 
+          Provide an executive summary addressing: 
+          1. Are things improving? 
+          2. Which marketplace has the most issues and why? 
+          3. Provide 2 actionable insights.
+          
+          RETURN FORMAT: Must be clean HTML. 
+          First, output the English version under a <h3 style="margin-top:0; color:#4338ca;">🇺🇸 English Summary</h3> tag.
+          Then, add a divider: <hr style="margin: 20px 0; border: 0; border-top: 1px solid #e2e8f0;">.
+          Then, output the EXACT translation in Bahasa Indonesia under a <h3 style="margin-top:0; color:#4338ca;">🇮🇩 Ringkasan Bahasa Indonesia</h3> tag.
+          Use <p>, <strong>, and <ul> inside both sections for readability.`
         },
         { role: 'user', content: JSON.stringify(promptData) }
       ]
@@ -77,38 +87,37 @@ export async function GET() {
       </tr>
     `).join('')
 
-    // 6. Build Final Email HTML
+    // 6. Build Final Email HTML (Bilingual Headers)
     const htmlEmail = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
         <h1 style="color: #1e293b; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">Weekly Incident Intelligence Report</h1>
         
         <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-          <h2 style="margin-top: 0; color: #4338ca;">AI Executive Summary</h2>
           ${aiAnalysisHTML}
         </div>
 
-        <h3>Category Breakdown</h3>
+        <h3>Category Breakdown / Rincian Kategori</h3>
         <ul>
           ${categoryStats.map(c => `<li><strong>${c.category}:</strong> ${c.percentage}% (${c.count} incidents)</li>`).join('')}
         </ul>
-        <p><em>Trend: ${currentIncidents.length} incidents this week (compared to ${priorCount} last week).</em></p>
+        <p><em>Trend: ${currentIncidents.length} incidents this week / insiden minggu ini (compared to ${priorCount} last week / dibanding minggu lalu).</em></p>
 
-        <h3 style="margin-top: 30px;">Recent Incident Log</h3>
+        <h3 style="margin-top: 30px;">Recent Incident Log / Catatan Insiden Terbaru</h3>
         <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
           <tr style="background-color: #f1f5f9;">
-            <th style="padding: 8px;">Incident</th>
+            <th style="padding: 8px;">Incident / Insiden</th>
             <th style="padding: 8px;">PIC</th>
             <th style="padding: 8px;">Status</th>
           </tr>
-          ${tableRows || '<tr><td colspan="3" style="padding: 8px; text-align: center;">No incidents this week.</td></tr>'}
+          ${tableRows || '<tr><td colspan="3" style="padding: 8px; text-align: center;">No incidents this week / Tidak ada insiden minggu ini.</td></tr>'}
         </table>
       </div>
     `
 
     // 7. Send Email via Resend
     const { data: emailData, error: emailError } = await resend.emails.send({
-      from: 'Incident Tracker <reports@aerisbeaute.com>',
-      to: ['jsc.giovanni@gmail.com', 'jessica@aerisbeaute.com'], // <--- CHANGE THIS TO YOUR EMIAL
+      from: 'Incident Tracker <reports@aerisbeaute.com>', // UPDATE ONCE DOMAIN IS VERIFIED
+      to: ['jsc.giovanni@gmail.com, jessica@aerisbeaute.com'], 
       subject: `Weekly Incident Report - ${today.toLocaleDateString()}`,
       html: htmlEmail,
     })

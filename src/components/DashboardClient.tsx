@@ -279,6 +279,14 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
   }
 
   const updateStatus = async (id: string, newStatus: string) => {
+    // 1. Optimistic UI update (instantly changes the dropdown on screen)
+    setIncidents(prevIncidents => 
+      prevIncidents.map(inc => 
+        inc.id === id ? { ...inc, status: newStatus } : inc
+      )
+    )
+
+    // 2. Database update (happens in the background)
     await supabase.from('incidents').update({ status: newStatus }).eq('id', id)
   }
 

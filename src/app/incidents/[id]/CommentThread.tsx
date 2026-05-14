@@ -149,11 +149,34 @@ export default function CommentThread({
   }
 
   const handleStatusChange = async (newStatus: string) => {
-    await supabase.from('incidents').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', incidentId)
+    // 1. Optimistic Update
+    if (incident) {
+      setIncident({ ...incident, status: newStatus })
+    }
+    
+    // 2. Background DB save
+    await supabase
+      .from('incidents')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', incidentId)
   }
 
   const handleAssigneeChange = async (newAssigneeId: string) => {
-    await supabase.from('incidents').update({ assigned_to: newAssigneeId || null, updated_at: new Date().toISOString() }).eq('id', incidentId)
+    // 1. Optimistic Update (Find the agent's name/email to instantly update the profile badge too)
+    const assignedAgent = agents.find(a => a.id === newAssigneeId) || null
+    if (incident) {
+      setIncident({ 
+        ...incident, 
+        assigned_to: newAssigneeId || null,
+        profiles: assignedAgent ? { full_name: assignedAgent.full_name, email: assignedAgent.email } : null
+      })
+    }
+
+    // 2. Background DB save
+    await supabase
+      .from('incidents')
+      .update({ assigned_to: newAssigneeId || null, updated_at: new Date().toISOString() })
+      .eq('id', incidentId)
   }
 
   // --- EDIT FUNCTIONS ---

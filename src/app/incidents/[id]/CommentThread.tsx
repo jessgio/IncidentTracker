@@ -62,7 +62,9 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
     fetchAll()
     const channel = supabase.channel(`comments_${incidentId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments', filter: `incident_id=eq.${incidentId}` }, () => fetchAll())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'incidents', filter: `id=eq.${incidentId}` }, () => fetchAll()).subscribe()
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'incidents', filter: `id=eq.${incidentId}` }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments', filter: `incident_id=eq.${incidentId}` }, () => fetchAll())
+      .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [incidentId])
 
@@ -85,6 +87,24 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
     await supabase.storage.from('incident-attachments').remove([path])
     await supabase.from('attachments').delete().eq('id', attachment.id)
     await fetchAll()
+  }
+
+  const downloadFile = async (e: React.MouseEvent, url: string, filename: string) => {
+    e.preventDefault()
+    try {
+      const res = await fetch(url)
+      const blob = await res.blob()
+      const blobUrl = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      window.open(url, '_blank')
+    }
   }
 
   const handleSubmitComment = async (e: React.FormEvent) => {
@@ -231,7 +251,46 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
         )}
 
         {/* ATTACHMENTS */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm mb-6"><div className="px-7 py-5 border-b-2 border-slate-100 flex justify-between items-center"><h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Attachments <span className="ml-2 font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md text-xs">{attachments.length}</span></h2><button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="text-xs font-bold bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-xl transition shadow-sm">{isUploading ? 'Uploading...' : '+ Upload Files'}</button><input ref={fileInputRef} type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx" onChange={handleFileUpload} className="hidden" /></div><div className="px-7 py-5">{attachments.length === 0 ? <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition"><div className="text-4xl mb-3">📎</div><p className="text-sm font-bold text-slate-500">Click here to upload photos & files</p></div> : <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{attachments.map(att => <div key={att.id} className="group relative rounded-2xl overflow-hidden border-2 border-slate-200 aspect-square bg-slate-50">{att.file_type.startsWith('image') ? <a href={att.file_url} target="_blank"><img src={att.file_url} className="w-full h-full object-cover" /></a> : <a href={att.file_url} target="_blank" className="flex flex-col items-center justify-center p-4 h-full hover:bg-slate-100 transition"><div className="text-4xl mb-2">📄</div><span className="text-xs font-bold text-slate-800 text-center line-clamp-2 px-2">{att.file_name}</span></a>}<button onClick={() => handleDeleteAttachment(att)} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-rose-500 hover:bg-rose-600 text-white w-7 h-7 rounded-full text-sm font-bold shadow-md transition-all">×</button></div>)}</div>}</div></div>
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm mb-6">
+          <div className="px-7 py-5 border-b-2 border-slate-100 flex justify-between items-center">
+            <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Attachments <span className="ml-2 font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md text-xs">{attachments.length}</span></h2>
+            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="text-xs font-bold bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-xl transition shadow-sm">{isUploading ? 'Uploading...' : '+ Upload Files'}</button>
+            <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx" onChange={handleFileUpload} className="hidden" />
+          </div>
+          <div className="px-7 py-5">
+            {attachments.length === 0 ? (
+              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition">
+                <div className="text-4xl mb-3">📎</div><p className="text-sm font-bold text-slate-500">Click here to upload photos & files</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {attachments.map(att => {
+                  const isImg = att.file_type.startsWith('image')
+                  return (
+                    <div key={att.id} className="group relative rounded-2xl overflow-hidden border-2 border-slate-200 aspect-square bg-slate-50 flex items-center justify-center cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title="Click to download">
+                      {isImg ? (
+                        <img src={att.file_url} className="w-full h-full object-cover group-hover:opacity-80 transition" />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center p-4 h-full hover:bg-slate-100 transition w-full">
+                          <div className="text-4xl mb-2">📄</div>
+                          <span className="text-xs font-bold text-slate-800 text-center line-clamp-2 px-2">{att.file_name}</span>
+                        </div>
+                      )}
+                      
+                      {/* Download Icon Overlay */}
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition focus:outline-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-white drop-shadow-md" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                      </div>
+
+                      {/* Delete Button */}
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteAttachment(att); }} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-rose-500 hover:bg-rose-600 text-white w-7 h-7 rounded-full text-sm font-bold shadow-md transition-all z-10">×</button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* COMMENTS */}
         <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm">

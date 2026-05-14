@@ -8,9 +8,12 @@ import {
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../lib/incident-extra-fields'
 
+type Attachment = { id: string; file_name: string; file_type: string; file_url: string; created_at: string }
+
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
   order_number: string; complaint_date: string; created_at: string; ai_suggestion: string | null;
+  attachments?: Attachment[]
 } & IncidentExtraDbFields
 
 type Marketplace = { id: string; name: string }
@@ -20,6 +23,25 @@ type ChartStat = { name: string; count: number; percentage: number }
 const colorMap: Record<string, string> = { blue: 'bg-blue-50 text-blue-800 ring-blue-300', purple: 'bg-purple-50 text-purple-800 ring-purple-300', rose: 'bg-rose-50 text-rose-800 ring-rose-300', slate: 'bg-slate-100 text-slate-800 ring-slate-300', amber: 'bg-amber-50 text-amber-800 ring-amber-300', emerald: 'bg-emerald-50 text-emerald-800 ring-emerald-300', cyan: 'bg-cyan-50 text-cyan-800 ring-cyan-300', pink: 'bg-pink-50 text-pink-800 ring-pink-300', indigo: 'bg-indigo-50 text-indigo-800 ring-indigo-300', orange: 'bg-orange-50 text-orange-800 ring-orange-300' }
 const solidColorMap: Record<string, string> = { blue: 'bg-blue-500', purple: 'bg-purple-500', rose: 'bg-rose-500', slate: 'bg-slate-600', amber: 'bg-amber-500', emerald: 'bg-emerald-500', cyan: 'bg-cyan-500', pink: 'bg-pink-500', indigo: 'bg-indigo-500', orange: 'bg-orange-500' }
 const statusStyles: Record<string, { select: string; dot: string }> = { 'Not Started': { select: 'bg-rose-50 text-rose-800 border-rose-300', dot: 'bg-rose-500' }, 'In Progress': { select: 'bg-amber-50 text-amber-800 border-amber-300', dot: 'bg-amber-500' }, 'Completed': { select: 'bg-emerald-50 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' } }
+
+// Helper for cross-origin downloads
+const downloadFile = async (e: React.MouseEvent, url: string, filename: string) => {
+  e.stopPropagation() // Prevent row click
+  try {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    const blobUrl = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(blobUrl)
+  } catch (err) {
+    window.open(url, '_blank') // Fallback if CORS blocks the fetch
+  }
+}
 
 function InlineAdd({ onAdd, onCancel, placeholder, extraField }: any) {
   const [name, setName] = useState(''); const [extra, setExtra] = useState(extraField?.options[0]?.value || '')
@@ -122,7 +144,9 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
     let countQuery = supabase.from('incidents').select('id', { count: 'exact', head: true }); if (fFrom) countQuery = countQuery.gte('complaint_date', fFrom); if (fTo) countQuery = countQuery.lte('complaint_date', fTo); if (fCat) countQuery = countQuery.eq('category', fCat); if (fMp) countQuery = countQuery.eq('marketplace', fMp); if (fStat) countQuery = countQuery.eq('status', fStat);
     const { count } = await countQuery; setTotalPages(Math.max(1, Math.ceil((count || 0) / PAGE_SIZE)))
     const start = (page - 1) * PAGE_SIZE; const end = start + PAGE_SIZE - 1
-    let query = supabase.from('incidents').select('*').order('created_at', { ascending: false }).range(start, end)
+    
+    // FETCH ATTACHMENTS WITH INCIDENTS
+    let query = supabase.from('incidents').select('*, attachments(*)').order('created_at', { ascending: false }).range(start, end)
     if (fFrom) query = query.gte('complaint_date', fFrom); if (fTo) query = query.lte('complaint_date', fTo); if (fCat) query = query.eq('category', fCat); if (fMp) query = query.eq('marketplace', fMp); if (fStat) query = query.eq('status', fStat);
     const { data } = await query; if (data) setIncidents(data)
   }, [supabase, filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus])
@@ -137,7 +161,9 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
     const channel = supabase.channel('realtime_dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, () => { fetchPage(currentPage); fetchChunkedCounts() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplaces' }, fetchDropdowns)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, fetchDropdowns).subscribe()
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, fetchDropdowns)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments' }, () => fetchPage(currentPage))
+      .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [supabase])
 
@@ -247,7 +273,7 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
                   <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Date</label><input type="date" value={complaintDate} onChange={(e) => setComplaintDate(e.target.value)} className="w-full border-2 rounded-xl px-4 py-2.5 text-slate-900 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 font-medium" required /></div>
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Category</label>
-                    {isAddingCat ? <InlineAdd onCancel={() => setIsAddingCat(false)} onAdd={handleAddCategory} extraField={{ label: 'Color', options: Object.keys(colorMap) }} placeholder="Name" /> : 
+                    {isAddingCat ? <InlineAdd onCancel={() => setIsAddingCat(false)} onAdd={handleAddCategory} extraField={{ label: 'Color', options: Object.keys(colorMap).map(c=>({label:c,value:c})) }} placeholder="Name" /> : 
                     <div className="flex gap-1.5"><select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full border-2 rounded-xl px-4 py-2.5 text-slate-900 border-slate-300 focus:border-blue-400 font-medium"><option value="">Select...</option>{categories.map(c=><option key={c.name} value={c.name}>{c.name}</option>)}</select><button type="button" onClick={() => setIsAddingCat(true)} className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold px-4 rounded-xl transition">+</button></div>}
                   </div>
                   <div>
@@ -289,29 +315,59 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
         <div className="px-6 py-3 border-b border-slate-200 bg-white text-xs font-bold text-slate-500 rounded-t-2xl border-x border-t">💡 Tip: Click any cell to edit it directly, or scroll horizontally. Use pagination at the bottom to view more.</div>
         <div className="bg-white rounded-b-2xl shadow-sm border border-slate-200 overflow-hidden relative">
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[3600px] border-collapse">
+            <table className="w-full min-w-[3600px] border-collapse relative">
               <thead className="bg-slate-100 border-b-2 border-slate-200">
                 <tr>
-                  <th className="sticky left-0 z-20 bg-slate-100 text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest w-[240px] min-w-[240px]">Incident</th>
-                  <th className="sticky left-[240px] z-20 bg-slate-100 text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest w-[160px] min-w-[160px] border-r-2 border-slate-200 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.1)]">Order #</th>
+                  <th className="sticky left-0 z-30 bg-slate-100 text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest w-[240px] min-w-[240px]">Incident</th>
+                  <th className="sticky left-[240px] z-30 bg-slate-100 text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest w-[160px] min-w-[160px]">Media</th>
+                  <th className="sticky left-[400px] z-30 bg-slate-100 text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest w-[160px] min-w-[160px] border-r-2 border-slate-200 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.1)]">Order #</th>
                   {['Date', 'Category', 'Marketplace'].map(h => <th key={h} className="text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest whitespace-nowrap">{h}</th>)}
                   {incidentExtraFields.map(f => <th key={f.key} className="text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest whitespace-nowrap">{f.label}</th>)}
                   {['Status', 'Draft Response'].map(h => <th key={h} className="text-left px-5 py-4 text-xs font-bold text-slate-600 uppercase tracking-widest">{h}</th>)}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {incidents.length === 0 ? <tr><td colSpan={7 + incidentExtraFields.length} className="p-10 text-center font-medium text-slate-500">No incidents found</td></tr> : 
+                {incidents.length === 0 ? <tr><td colSpan={8 + incidentExtraFields.length} className="p-10 text-center font-medium text-slate-500">No incidents found</td></tr> : 
                 incidents.map(inc => {
                   const sStyle = statusStyles[inc.status] || statusStyles['Not Started']
                   return (
-                    <tr key={inc.id} onClick={() => window.location.href = `/incidents/${inc.id}`} className="group hover:bg-blue-50 transition cursor-pointer">
-                      <td className="sticky left-0 z-10 bg-white group-hover:bg-blue-50 transition-colors px-5 py-4 w-[240px] min-w-[240px] align-top"><p className="font-bold text-slate-900 text-sm leading-relaxed">{inc.title}</p></td>
-                      <td className="sticky left-[240px] z-10 bg-white group-hover:bg-blue-50 transition-colors px-5 py-4 w-[160px] min-w-[160px] align-top border-r-2 border-slate-100 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]"><span className="font-mono text-xs font-bold bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-300">#{inc.order_number}</span></td>
+                    <tr key={inc.id} onClick={() => window.location.href = `/incidents/${inc.id}`} className="group hover:bg-blue-50 transition cursor-pointer relative">
+                      {/* 1. Sticky: Incident */}
+                      <td className="sticky left-0 z-20 bg-white group-hover:bg-blue-50 transition-colors px-5 py-4 w-[240px] min-w-[240px] align-top"><p className="font-bold text-slate-900 text-sm leading-relaxed">{inc.title}</p></td>
+                      
+                      {/* 2. Sticky: Attachments */}
+                      <td className="sticky left-[240px] z-20 bg-white group-hover:bg-blue-50 transition-colors px-5 py-4 w-[160px] min-w-[160px] align-top">
+                        {(!inc.attachments || inc.attachments.length === 0) ? (
+                          <span className="text-xs font-medium text-slate-400 italic">None</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 mt-0.5">
+                            {inc.attachments.slice(0, 3).map(att => {
+                              const isImg = att.file_type.startsWith('image')
+                              return (
+                                <div key={att.id} className="relative w-8 h-8 rounded-lg overflow-hidden border border-slate-300 bg-slate-100 group/att cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title={`Download ${att.file_name}`}>
+                                  {isImg ? <img src={att.file_url} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-bold text-slate-500">📄</div>}
+                                  {/* Download Icon Overlay */}
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/att:opacity-100 flex items-center justify-center transition focus:outline-none">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                            {inc.attachments.length > 3 && (
+                               <div className="w-8 h-8 rounded-lg border border-slate-300 bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600">+{inc.attachments.length - 3}</div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 3. Sticky: Order Number (with shadow) */}
+                      <td className="sticky left-[400px] z-20 bg-white group-hover:bg-blue-50 transition-colors px-5 py-4 w-[160px] min-w-[160px] align-top border-r-2 border-slate-100 shadow-[4px_0_10px_-3px_rgba(0,0,0,0.05)]"><span className="font-mono text-xs font-bold bg-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-300">#{inc.order_number}</span></td>
                       
                       <td className="px-5 py-4 text-sm font-medium text-slate-700 whitespace-nowrap align-top">{inc.complaint_date ? new Date(inc.complaint_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
                       <td className="px-5 py-4 align-top"><span className={`px-3 py-1.5 rounded-full text-xs font-bold ring-1 ring-inset ${getCategoryStyle(inc.category)}`}>{inc.category}</span></td>
                       <td className="px-5 py-4 text-sm font-bold text-slate-800 whitespace-nowrap align-top">{inc.marketplace}</td>
                       
+                      {/* Dynamic Editable Extra Cells */}
                       {incidentExtraFields.map(field => {
                         const value = inc[field.key as keyof IncidentExtraDbFields]
                         return (
@@ -335,11 +391,10 @@ export default function DashboardClient({ userEmail }: { userEmail: string }) {
             </table>
           </div>
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-6 py-4 border-t-2 border-slate-200 bg-slate-100">
+            <div className="flex items-center justify-between px-6 py-4 border-t-2 border-slate-200 bg-slate-100/50">
               <p className="text-sm font-bold text-slate-600">Page <span className="text-slate-900">{currentPage}</span> of {totalPages} <span className="text-slate-400 mx-2">|</span> <span className="text-slate-900">{totalCount}</span> total incidents</p>
               <div className="flex gap-2">
                 <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="px-4 py-2 bg-white border-2 border-slate-300 font-bold rounded-xl text-sm text-slate-800 hover:border-slate-400 disabled:opacity-50 transition shadow-sm">← Prev</button>
-                {getPaginationRange().map((page, idx) => page === '...' ? <span key={`ellipsis-${idx}`} className="px-2 font-bold text-slate-400">...</span> : <button key={page} onClick={() => handlePageChange(page as number)} className={`w-9 h-9 font-bold rounded-xl border-2 transition ${currentPage === page ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-300 text-slate-800 hover:border-slate-400'}`}>{page}</button>)}
                 <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage === totalPages} className="px-4 py-2 bg-white border-2 border-slate-300 font-bold rounded-xl text-sm text-slate-800 hover:border-slate-400 disabled:opacity-50 transition shadow-sm">Next →</button>
               </div>
             </div>

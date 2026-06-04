@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { createClient } from '../utils/supabase/client'
 import { categoryColorMap } from '../lib/incident-status'
 
-// Types
 type Item = {
   id: string
   name: string
@@ -21,25 +20,19 @@ function ConfirmDeleteModal({
   onCancel: () => void
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl border-2 border-slate-200 p-7 max-w-sm w-full">
-        <div className="text-center mb-6">
-          <div className="text-5xl mb-4">🗑️</div>
-          <h3 className="text-xl font-black text-slate-900 mb-2">Delete "{itemName}"?</h3>
-          <p className="text-sm font-medium text-slate-600 leading-relaxed">
-            This will permanently remove it from the dropdown list. Existing incidents will not be affected.
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={onCancel}
-            className="flex-1 px-5 py-3 rounded-xl border-2 border-slate-300 text-slate-700 hover:bg-slate-50 font-bold text-sm transition"
-          >
+    <div className="fixed inset-0 bg-zinc-900/50 z-[60] flex items-center justify-center p-4">
+      <div className="app-card p-6 max-w-sm w-full">
+        <h3 className="text-lg font-semibold text-zinc-900 mb-2">Delete &ldquo;{itemName}&rdquo;?</h3>
+        <p className="text-sm text-zinc-600 leading-relaxed mb-6">
+          This removes it from dropdown lists. Existing incidents are not changed.
+        </p>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="app-btn-secondary flex-1">
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-sm transition shadow-sm border border-rose-700"
+            className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition"
           >
             Delete
           </button>
@@ -63,10 +56,10 @@ export function ManageListsModal({ onClose }: { onClose: () => void }) {
   }, [])
 
   const fetchAll = async () => {
-    const { data: catData } = await supabase.from('categories').select('*').order('name', { ascending: true })
+    const { data: catData } = await supabase.from('categories').select('id, name, color').order('name', { ascending: true })
     if (catData) setCategories(catData)
 
-    const { data: mpData } = await supabase.from('marketplaces').select('*').order('name', { ascending: true })
+    const { data: mpData } = await supabase.from('marketplaces').select('id, name').order('name', { ascending: true })
     if (mpData) setMarketplaces(mpData)
   }
 
@@ -86,38 +79,38 @@ export function ManageListsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      {/* BACKDROP */}
-      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" onClick={onClose} />
+      <div className="fixed inset-0 bg-zinc-900/50 z-40" onClick={onClose} aria-hidden />
 
-      {/* MODAL */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div className="bg-white rounded-3xl shadow-2xl border-2 border-slate-200 w-full max-w-md pointer-events-auto overflow-hidden">
-
-          {/* HEADER */}
-          <div className="flex items-center justify-between px-7 py-5 bg-slate-50 border-b-2 border-slate-200">
-            <div>
-              <h2 className="text-xl font-black text-slate-900 uppercase tracking-widest">Manage Lists</h2>
-            </div>
-            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition text-2xl font-bold leading-none">
+        <div
+          className="app-card w-full max-w-md pointer-events-auto overflow-hidden"
+          role="dialog"
+          aria-labelledby="manage-lists-title"
+        >
+          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 bg-zinc-50">
+            <h2 id="manage-lists-title" className="text-lg font-semibold text-zinc-900">
+              Manage lists
+            </h2>
+            <button type="button" onClick={onClose} className="app-btn-ghost w-8 h-8 p-0" aria-label="Close">
               ×
             </button>
           </div>
 
-          {/* TABS */}
-          <div className="flex gap-2 p-3 mx-6 mt-5 bg-slate-100 rounded-xl border border-slate-200">
+          <div className="flex gap-1 p-3 mx-4 mt-4 bg-zinc-100 rounded-lg">
             {(['categories', 'marketplaces'] as const).map(tab => (
               <button
                 key={tab}
+                type="button"
                 onClick={() => { setActiveTab(tab); setDeleteError('') }}
-                className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-bold transition capitalize ${
+                className={`flex-1 py-2 px-3 rounded-md text-sm font-semibold transition capitalize ${
                   activeTab === tab
-                    ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
+                    ? 'bg-white text-zinc-900 shadow-sm border border-zinc-200'
+                    : 'text-zinc-600 hover:text-zinc-900'
                 }`}
               >
                 {tab}
-                <span className={`ml-2 text-xs px-2 py-0.5 rounded-md ${
-                  activeTab === tab ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-600'
+                <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded ${
+                  activeTab === tab ? 'bg-blue-100 text-blue-800' : 'bg-zinc-200 text-zinc-700'
                 }`}>
                   {tab === 'categories' ? categories.length : marketplaces.length}
                 </span>
@@ -125,47 +118,45 @@ export function ManageListsModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
 
-          {/* LIST */}
-          <div className="px-6 py-4 mt-2 max-h-[360px] overflow-y-auto">
+          <div className="px-4 py-3 max-h-[360px] overflow-y-auto">
             {deleteError && (
-              <div className="mb-4 px-4 py-3 bg-rose-50 border-2 border-rose-200 text-rose-700 font-bold text-xs rounded-xl">
+              <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-800 text-xs font-medium rounded-lg">
                 {deleteError}
               </div>
             )}
 
             {items.length === 0 && (
-              <div className="text-center py-10 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                <div className="text-4xl mb-3">📭</div>
-                <p className="text-sm font-bold text-slate-500">No {activeTab} yet</p>
+              <div className="text-center py-10 rounded-lg border border-dashed border-zinc-200 bg-zinc-50">
+                <p className="text-sm font-medium text-zinc-600">No {activeTab} yet</p>
               </div>
             )}
 
-            <ul className="space-y-2">
+            <ul className="space-y-1">
               {items.map(item => (
-                <li key={item.id} className="flex items-center justify-between gap-3 p-3 rounded-xl hover:bg-slate-50 border-2 border-transparent hover:border-slate-200 transition group">
-                  <div className="flex items-center gap-3">
-                    {/* Color dot for categories */}
+                <li
+                  key={item.id}
+                  className="flex items-center justify-between gap-3 p-2.5 rounded-lg hover:bg-zinc-50 group"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
                     {activeTab === 'categories' && item.color && (
-                      <span className={`px-3 py-1.5 rounded-full text-xs font-bold ring-1 ring-inset ${categoryColorMap[item.color || 'slate'] || categoryColorMap.slate}`}>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ring-1 ring-inset truncate ${categoryColorMap[item.color || 'slate'] || categoryColorMap.slate}`}>
                         {item.name}
                       </span>
                     )}
-
-                    {/* Plain name for marketplaces */}
                     {activeTab === 'marketplaces' && (
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-xs font-black text-slate-600 border border-slate-300">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-8 h-8 shrink-0 rounded-md bg-zinc-200 flex items-center justify-center text-xs font-semibold text-zinc-700 border border-zinc-300">
                           {item.name[0].toUpperCase()}
                         </div>
-                        <span className="text-sm font-bold text-slate-900">{item.name}</span>
+                        <span className="text-sm font-medium text-zinc-900 truncate">{item.name}</span>
                       </div>
                     )}
                   </div>
 
-                  {/* DELETE BUTTON */}
                   <button
+                    type="button"
                     onClick={() => { setConfirmDelete(item); setDeleteError('') }}
-                    className="opacity-0 group-hover:opacity-100 flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 px-3 py-2 rounded-lg transition-all border border-rose-200 hover:border-rose-600"
+                    className="shrink-0 text-xs font-semibold text-red-700 hover:text-white bg-red-50 hover:bg-red-600 px-2.5 py-1.5 rounded-md transition border border-red-200 hover:border-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
                   >
                     Delete
                   </button>
@@ -174,16 +165,14 @@ export function ManageListsModal({ onClose }: { onClose: () => void }) {
             </ul>
           </div>
 
-          {/* FOOTER */}
-          <div className="px-6 py-5 bg-slate-50 border-t-2 border-slate-200 mt-2">
-            <p className="text-xs font-bold text-slate-500 text-center flex items-center justify-center gap-2">
-              💡 You can add new {activeTab} directly from the "Log New Incident" form.
+          <div className="px-4 py-4 border-t border-zinc-200 bg-zinc-50">
+            <p className="text-xs text-zinc-600 text-center">
+              Add new {activeTab} from the &ldquo;Log new incident&rdquo; form.
             </p>
           </div>
         </div>
       </div>
 
-      {/* CONFIRM DELETE SUB-MODAL */}
       {confirmDelete && (
         <ConfirmDeleteModal
           itemName={confirmDelete.name}

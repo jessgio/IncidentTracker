@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import Link from 'next/link'
 import { createClient } from '../../../utils/supabase/client'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue, formatDateOnly,
@@ -52,31 +53,45 @@ export default function CommentThread({
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const supabase = createClient()
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [comments])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [comments.length])
 
-  const fetchAll = async () => {
-    const { data: incData } = await supabase.from('incidents').select('*, profiles(full_name, email)').eq('id', incidentId).single()
-    if (incData) setIncident(incData)
-    const { data: commentData } = await supabase.from('comments').select('*, profiles(full_name, email)').eq('incident_id', incidentId).order('created_at', { ascending: true })
-    if (commentData) setComments(commentData as Comment[])
-    const { data: agentData } = await supabase.from('profiles').select('*'); if (agentData) setAgents(agentData)
-    const { data: catData } = await supabase.from('categories').select('*').order('name'); if (catData) setCategories(catData)
-    const { data: mpData } = await supabase.from('marketplaces').select('*').order('name'); if (mpData) setMarketplaces(mpData)
-    const { data: attachmentData } = await supabase.from('attachments').select('*').eq('incident_id', incidentId).order('created_at', { ascending: true })
-    if (attachmentData) setAttachments(attachmentData)
-  }
+  const fetchAll = useCallback(async () => {
+    const [incRes, commentRes, agentRes, catRes, mpRes, attRes] = await Promise.all([
+      supabase.from('incidents').select('*, profiles(full_name, email)').eq('id', incidentId).single(),
+      supabase.from('comments').select('*, profiles(full_name, email)').eq('incident_id', incidentId).order('created_at', { ascending: true }),
+      supabase.from('profiles').select('id, full_name, email'),
+      supabase.from('categories').select('name, color').order('name'),
+      supabase.from('marketplaces').select('id, name').order('name'),
+      supabase.from('attachments').select('id, file_name, file_type, file_url, created_at').eq('incident_id', incidentId).order('created_at', { ascending: true }),
+    ])
+    if (incRes.data) setIncident(incRes.data)
+    if (commentRes.data) setComments(commentRes.data as Comment[])
+    if (agentRes.data) setAgents(agentRes.data)
+    if (catRes.data) setCategories(catRes.data)
+    if (mpRes.data) setMarketplaces(mpRes.data)
+    if (attRes.data) setAttachments(attRes.data)
+  }, [supabase, incidentId])
+
+  const scheduleRefetch = useCallback(() => {
+    if (refetchTimer.current) clearTimeout(refetchTimer.current)
+    refetchTimer.current = setTimeout(() => { fetchAll() }, 400)
+  }, [fetchAll])
 
   useEffect(() => {
     fetchAll()
     const channel = supabase.channel(`comments_${incidentId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments', filter: `incident_id=eq.${incidentId}` }, () => fetchAll())
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'incidents', filter: `id=eq.${incidentId}` }, () => fetchAll())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments', filter: `incident_id=eq.${incidentId}` }, () => fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments', filter: `incident_id=eq.${incidentId}` }, scheduleRefetch)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'incidents', filter: `id=eq.${incidentId}` }, scheduleRefetch)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments', filter: `incident_id=eq.${incidentId}` }, scheduleRefetch)
       .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [incidentId])
+    return () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current)
+      supabase.removeChannel(channel)
+    }
+  }, [incidentId, supabase, fetchAll, scheduleRefetch])
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files; if (!files || files.length === 0) return; setIsUploading(true)
@@ -183,19 +198,26 @@ export default function CommentThread({
     return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   }
 
-  if (!incident) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600 font-bold text-sm">Loading incident...</div>
+  if (!incident) {
+    return (
+      <div className="app-page flex items-center justify-center">
+        <p className="text-sm font-medium text-zinc-600">Loading incident…</p>
+      </div>
+    )
+  }
 
   const sm = statusMeta(incident.status)
   const waitingOnWarehouse = incident.status === WAITING_ON_WAREHOUSE
   const canRequestWarehouse = userRole !== 'warehouse' && !waitingOnWarehouse && sm.isOpen
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/30">
-      <div className="max-w-[95%] lg:max-w-5xl mx-auto p-4 md:p-8">
-        <a href="/" className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-blue-700 transition mb-6">← Back to Dashboard</a>
+    <div className="app-page">
+      <div className="app-container max-w-5xl">
+        <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-600 hover:text-blue-700 transition mb-6">
+          ← Back to dashboard
+        </Link>
 
-        {/* INCIDENT DETAILS */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm p-7 mb-6">
+        <div className="app-card p-6 mb-6">
           <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
             
             <div className="flex-1 w-full">
@@ -205,27 +227,30 @@ export default function CommentThread({
                     <div className="flex items-center gap-3">
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ring-1 ring-inset ${categoryRingStyle(categories.find(c => c.name === incident.category)?.color)}`}>{incident.category}</span>
                       <span className={`px-3 py-1 rounded-full text-xs font-bold ring-1 ring-inset ${sm.badge}`}>{incident.status}</span>
-                      <span className="text-xs text-slate-800 font-mono font-bold bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-300">#{incident.order_number}</span>
+                      <span className="text-xs text-zinc-800 font-mono font-semibold bg-zinc-100 px-2 py-1 rounded-md border border-zinc-200">#{incident.order_number}</span>
                     </div>
-                    <button onClick={startEditing} className="font-bold text-slate-700 hover:text-blue-700 transition flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-blue-50 px-3 py-2 rounded-lg border-2 border-slate-200 hover:border-blue-300 shadow-sm">
+                    <button type="button" onClick={startEditing} className="app-btn-secondary text-xs py-2">
                       <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>
                       Edit Case
                     </button>
                   </div>
-                  <h1 className="text-2xl font-black text-slate-900 mb-2 leading-relaxed">{incident.title}</h1>
-                  <p className="text-sm font-medium text-slate-600 mt-2">Logged {new Date(incident.created_at).toLocaleDateString('en-US', { dateStyle: 'long'})} <span className="mx-2 text-slate-300">|</span> Complaint date: <span className="text-slate-800 font-bold">{formatDateOnly(incident.complaint_date)}</span></p>
+                  <h1 className="text-2xl font-semibold text-zinc-900 mb-2 leading-snug">{incident.title}</h1>
+                  <p className="text-sm text-zinc-600 mt-2">
+                    Logged {new Date(incident.created_at).toLocaleDateString('en-US', { dateStyle: 'long'})}
+                    <span className="mx-2 text-zinc-300">·</span>
+                    Complaint: <span className="text-zinc-900 font-semibold">{formatDateOnly(incident.complaint_date)}</span>
+                  </p>
                   
-                  {/* DISPLAY EXTRA FIELDS (VIEW MODE) */}
-                  <div className="mt-8 border-t-2 border-slate-100 pt-5">
-                    <h3 className="text-sm font-black text-slate-800 mb-5 uppercase tracking-wider">Additional Details</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-y-6 gap-x-6">
+                  <div className="mt-6 border-t border-zinc-100 pt-5">
+                    <h3 className="text-sm font-semibold text-zinc-800 mb-4">Additional details</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-5">
                       {incidentExtraFields.map(field => {
                         const val = incident[field.key as keyof IncidentExtraDbFields]
                         if (val === null || val === undefined || val === '') return null;
                         return (
                           <div key={field.key} className={field.type === 'textarea' ? 'col-span-2 md:col-span-3' : ''}>
-                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">{field.label}</p>
-                            <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap leading-relaxed bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl">{formatExtraValue(val, field.type)}</p>
+                            <p className="app-label mb-1">{field.label}</p>
+                            <p className="text-sm text-zinc-900 whitespace-pre-wrap leading-relaxed bg-zinc-50 border border-zinc-200 px-3 py-2 rounded-lg">{formatExtraValue(val, field.type)}</p>
                           </div>
                         )
                       })}
@@ -234,38 +259,40 @@ export default function CommentThread({
                 </>
               ) : (
                 <div className="space-y-5">
-                  <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Issue Description</label><textarea value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="w-full border-2 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900" rows={2} /></div>
+                  <div>
+                    <label className="app-label">Issue description</label>
+                    <textarea value={editTitle} onChange={(e) => setEditTitle(e.target.value)} className="app-input resize-y" rows={2} />
+                  </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Order #</label><input value={editOrderNumber} onChange={(e) => setEditOrderNumber(e.target.value)} className="w-full border-2 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900" /></div>
-                    <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Date</label><input type="date" value={editComplaintDate} onChange={(e) => setEditComplaintDate(e.target.value)} className="w-full border-2 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900" /></div>
-                    <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Category</label><select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className="w-full border-2 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900"><option value="">Select</option>{categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</select></div>
-                    <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Marketplace</label><select value={editMarketplace} onChange={(e) => setEditMarketplace(e.target.value)} className="w-full border-2 border-slate-300 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900"><option value="">Select</option>{marketplaces.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}</select></div>
+                    <div><label className="app-label">Order #</label><input value={editOrderNumber} onChange={(e) => setEditOrderNumber(e.target.value)} className="app-input" /></div>
+                    <div><label className="app-label">Date</label><input type="date" value={editComplaintDate} onChange={(e) => setEditComplaintDate(e.target.value)} className="app-input" /></div>
+                    <div><label className="app-label">Category</label><select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className="app-select w-full"><option value="">Select</option>{categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}</select></div>
+                    <div><label className="app-label">Marketplace</label><select value={editMarketplace} onChange={(e) => setEditMarketplace(e.target.value)} className="app-select w-full"><option value="">Select</option>{marketplaces.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}</select></div>
                   </div>
                   
-                  {/* EDIT EXTRA FIELDS */}
-                  <div className="border-t-2 border-slate-100 pt-5 mt-2">
-                    <h3 className="text-sm font-black text-slate-800 mb-4 uppercase tracking-wider">Additional Details</h3>
+                  <div className="border-t border-zinc-100 pt-4 mt-2">
+                    <h3 className="text-sm font-semibold text-zinc-800 mb-3">Additional details</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {incidentExtraFields.map(field => (
                         <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2' : ''}>
-                          <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">{field.label}</label>
+                          <label className="app-label">{field.label}</label>
                           {field.type === 'textarea' ? (
-                            <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="w-full bg-slate-50 border-2 border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900 resize-y placeholder:text-slate-400" placeholder={(field as any).placeholder} />
+                            <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="app-input resize-y" placeholder={(field as any).placeholder} />
                           ) : field.type === 'select' ? (
-                            <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="w-full bg-slate-50 border-2 border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900">
-                              {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select...'}</option>)}
+                            <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="app-select w-full">
+                              {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
                             </select>
                           ) : (
-                            <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="w-full bg-slate-50 border-2 border-slate-200 focus:border-blue-400 focus:ring-2 focus:ring-blue-200 px-4 py-2.5 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400" />
+                            <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="app-input" />
                           )}
                         </div>
                       ))}
                     </div>
                   </div>
-                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                    <button onClick={() => setIsEditing(false)} className="px-5 py-2.5 text-sm font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition">Cancel</button>
-                    <button onClick={handleSaveEdit} disabled={isSubmitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm shadow-sm transition disabled:bg-slate-400">
-                      {isSubmitting ? 'Saving...' : 'Save Changes'}
+                  <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100">
+                    <button type="button" onClick={() => setIsEditing(false)} className="app-btn-secondary">Cancel</button>
+                    <button type="button" onClick={handleSaveEdit} disabled={isSubmitting} className="app-btn-primary">
+                      {isSubmitting ? 'Saving…' : 'Save changes'}
                     </button>
                   </div>
                 </div>
@@ -273,9 +300,9 @@ export default function CommentThread({
             </div>
 
             {!isEditing && (
-              <div className="flex flex-col gap-4 min-w-[240px] border-t-2 md:border-t-0 md:border-l-2 border-slate-100 pt-5 md:pt-0 md:pl-6">
+              <div className="flex flex-col gap-4 min-w-[240px] border-t md:border-t-0 md:border-l border-zinc-100 pt-5 md:pt-0 md:pl-6">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Status</label>
+                  <label className="app-label">Status</label>
                   <select
                     value={incident.status}
                     onChange={(e) => handleStatusChange(e.target.value)}
@@ -288,15 +315,15 @@ export default function CommentThread({
                   <button
                     type="button"
                     onClick={requestWarehouse}
-                    className="w-full text-xs font-bold bg-orange-100 hover:bg-orange-200 text-orange-900 border-2 border-orange-300 px-4 py-2.5 rounded-xl transition"
+                    className="w-full text-xs font-semibold bg-orange-100 hover:bg-orange-200 text-orange-900 border border-orange-300 px-4 py-2.5 rounded-lg transition"
                   >
                     Hand off to Warehouse
                   </button>
                 )}
                 {userRole !== 'warehouse' && (
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Assigned To</label>
-                    <select value={incident.assigned_to || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="w-full text-sm font-medium text-slate-900 px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300"><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</select>
+                    <label className="app-label">Assigned to</label>
+                    <select value={incident.assigned_to || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="app-select w-full"><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</select>
                   </div>
                 )}
               </div>
@@ -304,20 +331,20 @@ export default function CommentThread({
           </div>
           
           {!isEditing && (
-            <div className="mt-6 pt-5 border-t-2 border-slate-100 flex items-center gap-2 flex-wrap text-sm text-slate-600 font-medium">
-              Marketplace: <span className="font-bold text-slate-900 bg-slate-200 px-3 py-1 rounded-lg border border-slate-300">{incident.marketplace}</span>
-              {incident.profiles && <><span className="text-slate-300 mx-2">|</span> PIC: <span className="font-bold text-slate-900 ml-1">{incident.profiles.full_name || incident.profiles.email}</span></>}
+            <div className="mt-5 pt-4 border-t border-zinc-100 flex items-center gap-2 flex-wrap text-sm text-zinc-600">
+              Marketplace: <span className="font-semibold text-zinc-900 bg-zinc-100 px-2.5 py-1 rounded-md border border-zinc-200">{incident.marketplace}</span>
+              {incident.profiles && <><span className="text-zinc-300 mx-1">·</span> PIC: <span className="font-semibold text-zinc-900">{incident.profiles.full_name || incident.profiles.email}</span></>}
             </div>
           )}
         </div>
 
         {/* WAREHOUSE HANDOFF PANEL */}
         {(waitingOnWarehouse || (userRole === 'warehouse' && sm.isOpen)) && !isEditing && (
-          <div className="mb-6 bg-orange-50 border-2 border-orange-200 rounded-2xl p-6 shadow-sm">
+          <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl p-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-sm font-black text-orange-900 uppercase tracking-widest">Warehouse Fulfillment</h2>
-                <p className="text-sm font-medium text-orange-800 mt-1">
+                <h2 className="text-sm font-semibold text-orange-900">Warehouse fulfillment</h2>
+                <p className="text-sm text-orange-800 mt-1">
                   {waitingOnWarehouse
                     ? 'CS has requested warehouse action on this case.'
                     : 'Update fulfillment status when you pick up this case.'}
@@ -329,11 +356,11 @@ export default function CommentThread({
                 )}
               </div>
               <div className="min-w-[200px]">
-                <label className="block text-xs font-bold text-orange-900 uppercase mb-1.5">Warehouse Status</label>
+                <label className="app-label text-orange-900">Warehouse status</label>
                 <select
                   value={incident.warehouse_status || ''}
                   onChange={(e) => handleWarehouseStatusChange(e.target.value)}
-                  className="w-full text-sm font-bold px-4 py-2.5 rounded-xl border-2 border-orange-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                  className="app-select w-full border-orange-300"
                 >
                   {WAREHOUSE_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o || 'Select...'}</option>)}
                 </select>
@@ -344,35 +371,36 @@ export default function CommentThread({
 
         {/* AI DRAFT RESPONSE */}
         {incident.ai_suggestion && (
-          <div className="mb-6"><div className="flex gap-4 bg-violet-50 border-2 border-violet-200 rounded-2xl p-6 shadow-sm">
-            <span className="text-violet-600 font-black text-xl">❖</span><div><p className="text-sm font-black text-violet-900 mb-2 uppercase tracking-wide">AI Drafted Customer Response</p><p className="text-sm font-medium text-violet-950 leading-relaxed bg-white/60 p-4 rounded-xl border border-violet-100">{incident.ai_suggestion}</p></div>
-          </div></div>
+          <div className="mb-6 app-card bg-violet-50 border-violet-200 p-5">
+            <p className="text-sm font-semibold text-violet-900 mb-2">AI draft response</p>
+            <p className="text-sm text-violet-950 leading-relaxed bg-white p-4 rounded-lg border border-violet-100">{incident.ai_suggestion}</p>
+          </div>
         )}
 
         {/* ATTACHMENTS */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm mb-6">
-          <div className="px-7 py-5 border-b-2 border-slate-100 flex justify-between items-center">
-            <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Attachments <span className="ml-2 font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md text-xs">{attachments.length}</span></h2>
-            <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="text-xs font-bold bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-xl transition shadow-sm">{isUploading ? 'Uploading...' : '+ Upload Files'}</button>
+        <div className="app-card mb-6">
+          <div className="px-5 py-4 border-b border-zinc-100 flex justify-between items-center">
+            <h2 className="text-sm font-semibold text-zinc-900">Attachments <span className="ml-2 font-medium text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded text-xs">{attachments.length}</span></h2>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="app-btn-primary text-xs py-2">{isUploading ? 'Uploading…' : 'Upload files'}</button>
             <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,.pdf,.doc,.docx" onChange={handleFileUpload} className="hidden" />
           </div>
-          <div className="px-7 py-5">
+          <div className="px-5 py-4">
             {attachments.length === 0 ? (
-              <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition">
-                <div className="text-4xl mb-3">📎</div><p className="text-sm font-bold text-slate-500">Click here to upload photos & files</p>
-              </div>
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full border border-dashed border-zinc-300 rounded-xl p-10 text-center hover:border-blue-400 hover:bg-blue-50/40 transition">
+                <p className="text-sm font-medium text-zinc-600">Click to upload photos and files</p>
+              </button>
             ) : (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 {attachments.map(att => {
                   const isImg = att.file_type.startsWith('image')
                   return (
-                    <div key={att.id} className="group relative rounded-2xl overflow-hidden border-2 border-slate-200 aspect-square bg-slate-50 flex items-center justify-center cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title="Click to download">
+                    <div key={att.id} className="group relative rounded-xl overflow-hidden border border-zinc-200 aspect-square bg-zinc-50 flex items-center justify-center cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title="Click to download">
                       {isImg ? (
-                        <img src={att.file_url} className="w-full h-full object-cover group-hover:opacity-80 transition" />
+                        <img src={att.file_url} alt={att.file_name} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:opacity-90 transition" />
                       ) : (
-                        <div className="flex flex-col items-center justify-center p-4 h-full hover:bg-slate-100 transition w-full">
-                          <div className="text-4xl mb-2">📄</div>
-                          <span className="text-xs font-bold text-slate-800 text-center line-clamp-2 px-2">{att.file_name}</span>
+                        <div className="flex flex-col items-center justify-center p-4 h-full hover:bg-zinc-100 transition w-full">
+                          <span className="text-xs font-semibold text-zinc-500 mb-1">File</span>
+                          <span className="text-xs font-medium text-zinc-800 text-center line-clamp-2 px-2">{att.file_name}</span>
                         </div>
                       )}
                       
@@ -392,30 +420,30 @@ export default function CommentThread({
         </div>
 
         {/* COMMENTS */}
-        <div className="bg-white/90 backdrop-blur-sm rounded-2xl border-2 border-slate-200 shadow-sm">
-          <div className="px-7 py-5 border-b-2 border-slate-100">
-            <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Conversation <span className="ml-2 font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md text-xs">{comments.length}</span></h2>
+        <div className="app-card">
+          <div className="px-5 py-4 border-b border-zinc-100">
+            <h2 className="text-sm font-semibold text-zinc-900">Conversation <span className="ml-2 font-medium text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded text-xs">{comments.length}</span></h2>
           </div>
-          <div className="px-7 py-6 space-y-6 max-h-[480px] overflow-y-auto">
+          <div className="px-5 py-5 space-y-5 max-h-[480px] overflow-y-auto">
             {comments.map((comment, i) => {
               const isMe = comment.user_id === currentUserId
               const showAv = i === 0 || comments[i - 1].user_id !== comment.user_id
               return (
                 <div key={comment.id} className={`flex items-end gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                  <div className="w-9">{showAv && <div className="w-9 h-9 rounded-full bg-slate-300 text-slate-800 text-xs font-black flex items-center justify-center border-2 border-white shadow-sm">{comment.profiles?.full_name ? comment.profiles.full_name[0] : 'A'}</div>}</div>
+                  <div className="w-9">{showAv && <div className="w-9 h-9 rounded-full bg-zinc-200 text-zinc-800 text-xs font-semibold flex items-center justify-center border border-white">{comment.profiles?.full_name ? comment.profiles.full_name[0] : 'A'}</div>}</div>
                   <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                    {showAv && <div className={`flex gap-2 mb-1.5 ${isMe ? 'flex-row-reverse' : ''}`}><span className="text-xs font-black text-slate-800">{isMe ? 'You' : comment.profiles?.full_name}</span><span className="text-xs font-bold text-slate-400">{formatTime(comment.created_at)}</span></div>}
-                    <div className={`px-5 py-3 rounded-2xl text-sm font-medium shadow-sm border ${isMe ? 'bg-blue-600 border-blue-700 text-white rounded-br-sm' : 'bg-slate-100 border-slate-200 text-slate-900 rounded-bl-sm'}`}>{comment.comment_text}</div>
+                    {showAv && <div className={`flex gap-2 mb-1 ${isMe ? 'flex-row-reverse' : ''}`}><span className="text-xs font-semibold text-zinc-800">{isMe ? 'You' : comment.profiles?.full_name}</span><span className="text-xs text-zinc-500">{formatTime(comment.created_at)}</span></div>}
+                    <div className={`px-4 py-2.5 rounded-xl text-sm border ${isMe ? 'bg-blue-600 border-blue-700 text-white rounded-br-sm' : 'bg-zinc-100 border-zinc-200 text-zinc-900 rounded-bl-sm'}`}>{comment.comment_text}</div>
                   </div>
                 </div>
               )
             })}
             <div ref={bottomRef} />
           </div>
-          <div className="px-7 py-5 border-t-2 border-slate-100 bg-slate-50/80 rounded-b-2xl">
-            <form onSubmit={handleSubmitComment} className="flex gap-3 items-end">
-               <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(e) } }} placeholder="Write a comment..." rows={1} className="flex-1 border-2 border-slate-300 rounded-2xl px-5 py-3 text-sm font-medium text-slate-900 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 bg-white placeholder:text-slate-400 resize-none min-h-[48px]" />
-              <button type="submit" disabled={isSubmitting || !newComment.trim()} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-black w-14 h-[48px] rounded-2xl transition shadow-sm flex items-center justify-center">⇧</button>
+          <div className="px-5 py-4 border-t border-zinc-100 bg-zinc-50 rounded-b-xl">
+            <form onSubmit={handleSubmitComment} className="flex gap-2 items-end">
+               <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(e) } }} placeholder="Write a comment…" rows={1} className="app-input flex-1 resize-none min-h-[44px] rounded-xl" />
+              <button type="submit" disabled={isSubmitting || !newComment.trim()} className="app-btn-primary shrink-0 h-[44px] w-12 rounded-xl px-0" aria-label="Send comment">↑</button>
             </form>
           </div>
         </div>

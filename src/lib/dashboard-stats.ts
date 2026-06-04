@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { STATUS_VALUES } from './incident-status'
+import { STATUS_VALUES, WAITING_ON_WAREHOUSE } from './incident-status'
+import { applyIncidentListFilters, type IncidentListFilters } from './incident-list-filters'
 
 const OPEN_STATUSES = STATUS_VALUES.filter(s => s !== 'Resolved' && s !== 'Closed')
 const CLOSED_STATUSES = ['Resolved', 'Closed'] as const
@@ -166,8 +167,14 @@ export async function fetchDashboardStats(
     marketplace?: string
     status?: string
     userId?: string
+    search?: string
+    queue?: IncidentListFilters['queue']
   }
 ): Promise<DashboardStats> {
+  if (filters.search?.trim()) {
+    return fetchSearchScopedDashboardStats(supabase, filters)
+  }
+
   const { data, error } = await supabase.rpc('incident_dashboard_stats', {
     p_from: filters.from || null,
     p_to: filters.to || null,
@@ -179,4 +186,64 @@ export async function fetchDashboardStats(
 
   if (error) throw error
   return parseDashboardStats(data)
+}
+
+/** Stats for text search: RPC has no search param; aggregate matching rows client-side. */
+async function fetchSearchScopedDashboardStats(
+  supabase: SupabaseClient,
+  filters: {
+    from?: string
+    to?: string
+    category?: string
+    marketplace?: string
+    status?: string
+    userId?: string
+    search?: string
+    queue?: IncidentListFilters['queue']
+  }
+): Promise<DashboardStats> {
+  const listFilters: IncidentListFilters = {
+    from: filters.from,
+    to: filters.to,
+    cat: filters.category,
+    mp: filters.marketplace,
+    stat: filters.status,
+    queue: filters.queue,
+    search: filters.search,
+    userId: filters.userId,
+  }
+
+  const { data, error } = await applyIncidentListFilters(
+    supabase.from('incidents').select('status, assigned_to'),
+    listFilters
+  )
+
+  if (error) throw error
+
+  const rows = data ?? []
+  const byName: Record<string, number> = {}
+  let totalOpen = 0
+  let waitingOnWarehouse = 0
+  let myQueue = 0
+
+  for (const row of rows) {
+    const status = String(row.status)
+    byName[status] = (byName[status] ?? 0) + 1
+    if (status !== 'Resolved' && status !== 'Closed') totalOpen += 1
+    if (status === WAITING_ON_WAREHOUSE) waitingOnWarehouse += 1
+    if (filters.userId && row.assigned_to === filters.userId && status !== 'Resolved' && status !== 'Closed') {
+      myQueue += 1
+    }
+  }
+
+  const by_status = STATUS_VALUES.map(name => ({ name, count: byName[name] ?? 0 }))
+
+  return {
+    ...EMPTY_STATS,
+    total_all: rows.length,
+    total_open: totalOpen,
+    waiting_on_warehouse: waitingOnWarehouse,
+    my_queue: myQueue,
+    by_status,
+  }
 }

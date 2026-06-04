@@ -17,6 +17,7 @@ import {
 } from '../lib/incident-status'
 import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
+import { applyIncidentListFilters } from '../lib/incident-list-filters'
 import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
 import {
   buildImportTemplateXlsx,
@@ -205,19 +206,16 @@ export default function DashboardClient({
   }
 
   const applyFilters = useCallback(<T,>(query: T, f: Filters): T => {
-    let q = query as any
-    if (f.from) q = q.gte('complaint_date', f.from)
-    if (f.to) q = q.lte('complaint_date', f.to)
-    if (f.cat) q = q.eq('category', f.cat)
-    if (f.mp) q = q.eq('marketplace', f.mp)
-    if (f.stat) q = q.eq('status', f.stat)
-    if (f.queue === 'mine') q = q.eq('assigned_to', userId)
-    if (f.queue === 'warehouse') q = q.eq('status', WAITING_ON_WAREHOUSE)
-    if (f.search.trim()) {
-      const term = f.search.trim().replace(/%/g, '')
-      q = q.or(`title.ilike.%${term}%,order_number.ilike.%${term}%`)
-    }
-    return q as T
+    return applyIncidentListFilters(query, {
+      from: f.from,
+      to: f.to,
+      cat: f.cat,
+      mp: f.mp,
+      stat: f.stat,
+      queue: f.queue,
+      search: f.search,
+      userId,
+    })
   }, [userId])
 
   const currentFilters = useCallback((
@@ -234,7 +232,8 @@ export default function DashboardClient({
   }), [filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterQueue, filterSearch])
 
   const fetchStats = useCallback(async (
-    from?: string, to?: string, cat?: string, mp?: string, stat?: string
+    from?: string, to?: string, cat?: string, mp?: string, stat?: string,
+    queue?: QueuePreset, search?: string
   ) => {
     try {
       const data = await fetchDashboardStats(supabase, {
@@ -244,6 +243,8 @@ export default function DashboardClient({
         marketplace: (mp ?? filterMarketplace) || undefined,
         status: (stat ?? filterStatus) || undefined,
         userId,
+        queue: queue ?? filterQueue,
+        search: search ?? filterSearch,
       })
       setStats(data)
       setTotalCount(data.total_all)
@@ -251,7 +252,7 @@ export default function DashboardClient({
       // RPC not deployed yet — leave stats empty rather than downloading all rows.
       setStats(EMPTY_STATS)
     }
-  }, [supabase, userId, filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus])
+  }, [supabase, userId, filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterQueue, filterSearch])
 
   const fetchPage = useCallback(async (
     page: number, from?: string, to?: string, cat?: string, mp?: string, stat?: string,
@@ -321,7 +322,7 @@ export default function DashboardClient({
     setFilterMarketplace(mp); setFilterStatus(stat); setFilterQueue(queue); setFilterSearch(search)
     setCurrentPage(1); currentPageRef.current = 1
     fetchPage(1, from, to, cat, mp, stat, queue, search)
-    fetchStats(from, to, cat, mp, stat)
+    fetchStats(from, to, cat, mp, stat, queue, search)
   }
 
   const setQueuePreset = (queue: QueuePreset) => {
@@ -648,7 +649,7 @@ export default function DashboardClient({
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Search order # or description…"
+                placeholder="Search order #, description, category, marketplace, status…"
                 className="app-input min-w-[200px] flex-1 max-w-sm"
               />
               <button type="submit" className="app-btn-primary">Search</button>

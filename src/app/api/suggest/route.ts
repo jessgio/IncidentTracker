@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
+import { createClient } from '../../../utils/supabase/server'
 
 const client = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
@@ -8,6 +9,13 @@ const client = new OpenAI({
 
 export async function POST(req: NextRequest) {
   try {
+    // Only authenticated users may spend AI credits
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     // 1. Extract the variables being sent from the dashboard
     const { title, category, marketplace } = await req.json()
 

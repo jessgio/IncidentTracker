@@ -3,24 +3,34 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '../../../utils/supabase/client'
 import {
-  incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue,
+  incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue, formatDateOnly,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../../../lib/incident-extra-fields'
+import {
+  STATUS_VALUES, WAITING_ON_WAREHOUSE, statusMeta, statusChangePatch, categoryRingStyle,
+  type UserRole,
+} from '../../../lib/incident-status'
 
 type Attachment = { id: string; file_name: string; file_type: string; file_url: string; created_at: string }
 type Comment = { id: string; comment_text: string; created_at: string; user_id: string; profiles: { full_name: string; email: string } }
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
   order_number: string; complaint_date: string; created_at: string; assigned_to: string | null;
-  ai_suggestion: string | null; profiles: { full_name: string; email: string } | null
+  ai_suggestion: string | null; resolved_at?: string | null; warehouse_requested_at?: string | null;
+  profiles: { full_name: string; email: string } | null
 } & IncidentExtraDbFields
 
 type Profile = { id: string; full_name: string; email: string }
 
-const statusColors: Record<string, string> = { 'Not Started': 'bg-rose-50 text-rose-800 border-2 border-rose-300', 'In Progress': 'bg-amber-50 text-amber-800 border-2 border-amber-300', 'Completed': 'bg-emerald-50 text-emerald-800 border-2 border-emerald-300' }
-const colorMap: Record<string, string> = { blue: 'bg-blue-50 text-blue-800 ring-blue-300', purple: 'bg-purple-50 text-purple-800 ring-purple-300', rose: 'bg-rose-50 text-rose-800 ring-rose-300', slate: 'bg-slate-100 text-slate-800 ring-slate-300', amber: 'bg-amber-50 text-amber-800 ring-amber-300', emerald: 'bg-emerald-50 text-emerald-800 ring-emerald-300', cyan: 'bg-cyan-50 text-cyan-800 ring-cyan-300', pink: 'bg-pink-50 text-pink-800 ring-pink-300', indigo: 'bg-indigo-50 text-indigo-800 ring-indigo-300', orange: 'bg-orange-50 text-orange-800 ring-orange-300' }
+const WAREHOUSE_STATUS_OPTIONS = incidentExtraFields.find(f => f.key === 'warehouse_status')?.options ?? []
 
-export default function CommentThread({ incidentId, currentUserId, currentUserEmail }: { incidentId: string; currentUserId: string; currentUserEmail: string }) {
+export default function CommentThread({
+  incidentId, currentUserId, userRole,
+}: {
+  incidentId: string
+  currentUserId: string
+  userRole: UserRole
+}) {
   const [incident, setIncident] = useState<Incident | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
   const [agents, setAgents] = useState<Profile[]>([])
@@ -114,9 +124,39 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
   }
 
   const handleStatusChange = async (newStatus: string) => {
-    if (incident) setIncident({ ...incident, status: newStatus })
-    await supabase.from('incidents').update({ status: newStatus, updated_at: new Date().toISOString() }).eq('id', incidentId)
+    if (!incident) return
+    const patch = statusChangePatch(newStatus, {
+      resolved_at: incident.resolved_at,
+      warehouse_status: incident.warehouse_status,
+    })
+    setIncident({ ...incident, ...patch } as Incident)
+    await supabase.from('incidents').update(patch).eq('id', incidentId)
   }
+
+  const handleWarehouseStatusChange = async (newWs: string) => {
+    if (!incident) return
+    const patch: Record<string, string | null> = {
+      warehouse_status: newWs || null,
+      updated_at: new Date().toISOString(),
+    }
+    if (newWs === 'Completed' && incident.status === WAITING_ON_WAREHOUSE) {
+      Object.assign(patch, statusChangePatch('Investigating', {
+        resolved_at: incident.resolved_at,
+        warehouse_status: newWs,
+      }))
+    }
+    setIncident({ ...incident, ...patch } as Incident)
+    await supabase.from('incidents').update(patch).eq('id', incidentId)
+    if (newWs === 'Completed') {
+      await supabase.from('comments').insert([{
+        incident_id: incidentId,
+        user_id: currentUserId,
+        comment_text: 'Warehouse marked fulfillment as Completed — case returned to CS for customer follow-up.',
+      }])
+    }
+  }
+
+  const requestWarehouse = () => handleStatusChange(WAITING_ON_WAREHOUSE)
 
   const handleAssigneeChange = async (newAssigneeId: string) => {
     const aAgent = agents.find(a => a.id === newAssigneeId) || null
@@ -145,6 +185,10 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
 
   if (!incident) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600 font-bold text-sm">Loading incident...</div>
 
+  const sm = statusMeta(incident.status)
+  const waitingOnWarehouse = incident.status === WAITING_ON_WAREHOUSE
+  const canRequestWarehouse = userRole !== 'warehouse' && !waitingOnWarehouse && sm.isOpen
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/30">
       <div className="max-w-[95%] lg:max-w-5xl mx-auto p-4 md:p-8">
@@ -159,7 +203,8 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-bold ring-1 ring-inset ${colorMap[categories.find(c => c.name === incident.category)?.color || 'slate']}`}>{incident.category}</span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ring-1 ring-inset ${categoryRingStyle(categories.find(c => c.name === incident.category)?.color)}`}>{incident.category}</span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ring-1 ring-inset ${sm.badge}`}>{incident.status}</span>
                       <span className="text-xs text-slate-800 font-mono font-bold bg-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-300">#{incident.order_number}</span>
                     </div>
                     <button onClick={startEditing} className="font-bold text-slate-700 hover:text-blue-700 transition flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-blue-50 px-3 py-2 rounded-lg border-2 border-slate-200 hover:border-blue-300 shadow-sm">
@@ -168,7 +213,7 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
                     </button>
                   </div>
                   <h1 className="text-2xl font-black text-slate-900 mb-2 leading-relaxed">{incident.title}</h1>
-                  <p className="text-sm font-medium text-slate-600 mt-2">Logged {new Date(incident.created_at).toLocaleDateString('en-US', { dateStyle: 'long'})} <span className="mx-2 text-slate-300">|</span> Complaint date: <span className="text-slate-800 font-bold">{incident.complaint_date ? new Date(incident.complaint_date).toLocaleDateString() : '—'}</span></p>
+                  <p className="text-sm font-medium text-slate-600 mt-2">Logged {new Date(incident.created_at).toLocaleDateString('en-US', { dateStyle: 'long'})} <span className="mx-2 text-slate-300">|</span> Complaint date: <span className="text-slate-800 font-bold">{formatDateOnly(incident.complaint_date)}</span></p>
                   
                   {/* DISPLAY EXTRA FIELDS (VIEW MODE) */}
                   <div className="mt-8 border-t-2 border-slate-100 pt-5">
@@ -228,9 +273,32 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
             </div>
 
             {!isEditing && (
-              <div className="flex flex-col gap-4 min-w-[220px] border-t-2 md:border-t-0 md:border-l-2 border-slate-100 pt-5 md:pt-0 md:pl-6">
-                <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Status</label><select value={incident.status} onChange={(e) => handleStatusChange(e.target.value)} className={`w-full text-sm font-bold px-4 py-2.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 ${statusColors[incident.status]}`}><option>Not Started</option><option>In Progress</option><option>Completed</option></select></div>
-                <div><label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Assigned To</label><select value={incident.assigned_to || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="w-full text-sm font-medium text-slate-900 px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300"><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</select></div>
+              <div className="flex flex-col gap-4 min-w-[240px] border-t-2 md:border-t-0 md:border-l-2 border-slate-100 pt-5 md:pt-0 md:pl-6">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Status</label>
+                  <select
+                    value={incident.status}
+                    onChange={(e) => handleStatusChange(e.target.value)}
+                    className={`w-full text-sm font-bold px-4 py-2.5 rounded-xl border-2 focus:outline-none focus:ring-2 focus:ring-blue-300 ${sm.select}`}
+                  >
+                    {STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                {canRequestWarehouse && (
+                  <button
+                    type="button"
+                    onClick={requestWarehouse}
+                    className="w-full text-xs font-bold bg-orange-100 hover:bg-orange-200 text-orange-900 border-2 border-orange-300 px-4 py-2.5 rounded-xl transition"
+                  >
+                    Hand off to Warehouse
+                  </button>
+                )}
+                {userRole !== 'warehouse' && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">Assigned To</label>
+                    <select value={incident.assigned_to || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="w-full text-sm font-medium text-slate-900 px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-300"><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</select>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -242,6 +310,37 @@ export default function CommentThread({ incidentId, currentUserId, currentUserEm
             </div>
           )}
         </div>
+
+        {/* WAREHOUSE HANDOFF PANEL */}
+        {(waitingOnWarehouse || (userRole === 'warehouse' && sm.isOpen)) && !isEditing && (
+          <div className="mb-6 bg-orange-50 border-2 border-orange-200 rounded-2xl p-6 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-black text-orange-900 uppercase tracking-widest">Warehouse Fulfillment</h2>
+                <p className="text-sm font-medium text-orange-800 mt-1">
+                  {waitingOnWarehouse
+                    ? 'CS has requested warehouse action on this case.'
+                    : 'Update fulfillment status when you pick up this case.'}
+                </p>
+                {incident.warehouse_requested_at && (
+                  <p className="text-xs text-orange-700 mt-2 font-medium">
+                    Requested {new Date(incident.warehouse_requested_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <div className="min-w-[200px]">
+                <label className="block text-xs font-bold text-orange-900 uppercase mb-1.5">Warehouse Status</label>
+                <select
+                  value={incident.warehouse_status || ''}
+                  onChange={(e) => handleWarehouseStatusChange(e.target.value)}
+                  className="w-full text-sm font-bold px-4 py-2.5 rounded-xl border-2 border-orange-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                >
+                  {WAREHOUSE_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o || 'Select...'}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* AI DRAFT RESPONSE */}
         {incident.ai_suggestion && (

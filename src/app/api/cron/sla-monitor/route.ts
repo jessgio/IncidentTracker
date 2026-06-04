@@ -16,20 +16,31 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 
 const SLA_DAYS = 3
 
-export async function GET() {
-  try {
-    const thresholdDate = new Date(Date.now() - SLA_DAYS * 24 * 60 * 60 * 1000).toISOString()
+export async function GET(req: Request) {
+  // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`. Reject anything else.
+  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
 
-    // 1. Fetch Stalled Incidents (Older than 3 days, NOT completed)
-    const { data: stalledIncidents, error } = await supabase
+  try {
+    const thresholdDate = new Date(Date.now() - SLA_DAYS * 24 * 60 * 60 * 1000)
+
+    // Open cases stuck in their current state for longer than SLA_DAYS (uses
+    // status_changed_at when available, otherwise created_at).
+    const { data: openIncidents, error } = await supabase
       .from('incidents')
       .select('*, profiles(full_name, email)')
-      .neq('status', 'Completed')
-      .lt('created_at', thresholdDate)
+      .not('status', 'in', '("Resolved","Closed")')
       .order('created_at', { ascending: true })
 
     if (error) throw new Error(error.message)
-    if (!stalledIncidents || stalledIncidents.length === 0) {
+
+    const stalledIncidents = (openIncidents || []).filter(inc => {
+      const anchor = inc.status_changed_at || inc.created_at
+      return new Date(anchor) < thresholdDate
+    })
+
+    if (stalledIncidents.length === 0) {
       return NextResponse.json({ message: 'No SLA breaches. All good!' })
     }
 
@@ -54,7 +65,7 @@ export async function GET() {
       category: i.category,
       marketplace: i.marketplace,
       warehouse_status: i.warehouse_status,
-      days_open: Math.floor((Date.now() - new Date(i.created_at).getTime()) / (1000 * 60 * 60 * 24)),
+      days_open: Math.floor((Date.now() - new Date(i.status_changed_at || i.created_at).getTime()) / (1000 * 60 * 60 * 24)),
       assigned_to: i.profiles?.full_name || 'Unassigned'
     }))
 
@@ -63,11 +74,12 @@ export async function GET() {
       messages: [
         {
           role: 'system',
-          content: `You are an AI Operations Director. We have ${stalledIncidents.length} customer service incidents that have breached our ${SLA_DAYS}-day resolution SLA.
+          content: `You are an AI Operations Director. We have ${stalledIncidents.length} customer service incidents that have been stuck in their current workflow state for more than ${SLA_DAYS} days.
+          Statuses include: New, Investigating, Waiting on Warehouse, Waiting on Customer, Waiting on Marketplace, Resolved, Closed.
           Look at the provided JSON data of stalled tickets.
           Write an Urgent Executive Alert in HTML format.
           1. Briefly summarize the backlog.
-          2. Diagnose the main bottleneck (Are we waiting on a specific warehouse? Are agents overwhelmed? Are they unassigned?).
+          2. Diagnose the main bottleneck (warehouse queue? customer responses? marketplace appeals? unassigned cases?).
           3. Recommend 2 immediate macro-actions management should take to unblock the team and reduce this caseload.`
         },
         { role: 'user', content: JSON.stringify(promptData) }
@@ -78,9 +90,13 @@ export async function GET() {
     const analysisHTML = aiRes.choices[0]?.message?.content || '<p>Could not generate analysis.</p>'
 
     // 4. Send Email to Stakeholders
-    const stakeholderEmails = ['jessica@aerisbeaute.com'] // <--- Add manager emails here
+    const slaFrom = process.env.SLA_FROM || 'AI Operations Agent <reports@aerisbeaute.com>'
+    const stakeholderEmails = (process.env.SLA_STAKEHOLDERS || 'jessica@aerisbeaute.com')
+      .split(',')
+      .map(addr => addr.trim())
+      .filter(Boolean)
     await resend.emails.send({
-      from: 'AI Operations Agent <reports@aerisbeaute.com>', // <--- Update to your domain later
+      from: slaFrom,
       to: stakeholderEmails,
       subject: `🚨 SLA Alert: ${stalledIncidents.length} Incidents Overdue`,
       html: `
@@ -102,16 +118,17 @@ export async function GET() {
         <li style="margin-bottom: 8px;">
           <strong>Order:</strong> #${inc.order_number || 'N/A'}<br/>
           <strong>Issue:</strong> ${inc.title}<br/>
-          <strong>Stuck since:</strong> ${new Date(inc.created_at).toLocaleDateString()}
+          <strong>Stuck since:</strong> ${new Date(inc.status_changed_at || inc.created_at).toLocaleDateString()}
         </li>
       `).join('')
 
-      // Note: Because you are on Resend Free Tier, you can only email verified emails.
-      // We will wrap this in a try/catch so if the agent's email isn't verified in Resend yet, the script doesn't crash.
+      // Note: On the Resend Free Tier you can only email verified addresses, so an
+      // unverified PIC address will throw — we wrap this in try/catch so one failure
+      // doesn't abort the whole run.
       try {
         await resend.emails.send({
-          from: 'SLA Monitor <reports@aerisbeaute.com>', // <--- Update to your domain later
-          to: ['jessica@aerisbeaute.com'], // Emails exactly this specific PIC!
+          from: slaFrom,
+          to: [picData.email], // Nudge the actual responsible agent
           subject: `Action Required: You have ${picData.incidents.length} overdue incident(s)`,
           html: `
             <div style="font-family: sans-serif; color: #333;">

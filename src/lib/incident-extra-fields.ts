@@ -195,3 +195,14 @@ export function formatExtraValue(
 export function csvEscape(value: unknown) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`
 }
+
+// Date-only columns (e.g. complaint_date) are stored as `YYYY-MM-DD`. Passing that
+// straight to `new Date()` parses it as UTC midnight, which renders the previous day
+// in negative-offset timezones. Anchoring to local midnight avoids the off-by-one.
+export function formatDateOnly(
+  value: string | null | undefined,
+  opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }
+) {
+  if (!value) return '—'
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', opts)
+}

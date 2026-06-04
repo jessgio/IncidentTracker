@@ -1,0 +1,105 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+export type ChartRow = { name: string; count: number; percentage?: number }
+
+export type DashboardStats = {
+  total_all: number
+  total_open: number
+  waiting_on_warehouse: number
+  sla_breaches: number
+  avg_resolution_hours: number | null
+  financial_impact: number
+  my_queue: number
+  by_status: ChartRow[]
+  aging: { d0_1: number; d1_3: number; d3_plus: number }
+  by_category: ChartRow[]
+  by_marketplace: ChartRow[]
+  by_fault: ChartRow[]
+  by_blocked: ChartRow[]
+  trend: { this_week: number; last_week: number }
+}
+
+export const EMPTY_STATS: DashboardStats = {
+  total_all: 0,
+  total_open: 0,
+  waiting_on_warehouse: 0,
+  sla_breaches: 0,
+  avg_resolution_hours: null,
+  financial_impact: 0,
+  my_queue: 0,
+  by_status: [],
+  aging: { d0_1: 0, d1_3: 0, d3_plus: 0 },
+  by_category: [],
+  by_marketplace: [],
+  by_fault: [],
+  by_blocked: [],
+  trend: { this_week: 0, last_week: 0 },
+}
+
+function withPercentages(rows: ChartRow[], total: number): ChartRow[] {
+  return rows
+    .filter(r => r.count > 0)
+    .map(r => ({ ...r, percentage: Math.round((r.count / (total || 1)) * 100) }))
+}
+
+export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardStats {
+  if (!raw || typeof raw !== 'object') return EMPTY_STATS
+  const d = raw as Record<string, unknown>
+  const total = Number(d.total_all ?? 0)
+
+  const rows = (key: string): ChartRow[] =>
+    Array.isArray(d[key])
+      ? (d[key] as { name: string; count: number }[]).map(r => ({
+          name: String(r.name),
+          count: Number(r.count),
+        }))
+      : []
+
+  return {
+    total_all: total,
+    total_open: Number(d.total_open ?? 0),
+    waiting_on_warehouse: Number(d.waiting_on_warehouse ?? 0),
+    sla_breaches: Number(d.sla_breaches ?? 0),
+    avg_resolution_hours: d.avg_resolution_hours != null ? Number(d.avg_resolution_hours) : null,
+    financial_impact: Number(d.financial_impact ?? 0),
+    my_queue: Number(d.my_queue ?? 0),
+    by_status: rows('by_status'),
+    aging: {
+      d0_1: Number((d.aging as Record<string, number> | undefined)?.d0_1 ?? 0),
+      d1_3: Number((d.aging as Record<string, number> | undefined)?.d1_3 ?? 0),
+      d3_plus: Number((d.aging as Record<string, number> | undefined)?.d3_plus ?? 0),
+    },
+    by_category: withPercentages(rows('by_category'), totalForPct || total),
+    by_marketplace: withPercentages(rows('by_marketplace'), totalForPct || total),
+    by_fault: withPercentages(rows('by_fault'), totalForPct || total),
+    by_blocked: rows('by_blocked'),
+    trend: {
+      this_week: Number((d.trend as Record<string, number> | undefined)?.this_week ?? 0),
+      last_week: Number((d.trend as Record<string, number> | undefined)?.last_week ?? 0),
+    },
+  }
+}
+
+export async function fetchDashboardStats(
+  supabase: SupabaseClient,
+  filters: {
+    from?: string
+    to?: string
+    category?: string
+    marketplace?: string
+    status?: string
+    userId?: string
+  }
+): Promise<DashboardStats> {
+  const { data, error } = await supabase.rpc('incident_dashboard_stats', {
+    p_from: filters.from || null,
+    p_to: filters.to || null,
+    p_category: filters.category || null,
+    p_marketplace: filters.marketplace || null,
+    p_status: filters.status || null,
+    p_user_id: filters.userId || null,
+  })
+
+  if (error) throw error
+  return parseDashboardStats(data)
+}

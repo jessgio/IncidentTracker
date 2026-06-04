@@ -2,25 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '../utils/supabase/client'
+import { categoryColorMap } from '../lib/incident-status'
 
 // Types
 type Item = {
   id: string
   name: string
   color?: string
-}
-
-const colorMap: Record<string, string> = {
-  blue:    'bg-blue-50 text-blue-800 ring-blue-300',
-  purple:  'bg-purple-50 text-purple-800 ring-purple-300',
-  rose:    'bg-rose-50 text-rose-800 ring-rose-300',
-  slate:   'bg-slate-100 text-slate-800 ring-slate-300',
-  amber:   'bg-amber-50 text-amber-800 ring-amber-300',
-  emerald: 'bg-emerald-50 text-emerald-800 ring-emerald-300',
-  cyan:    'bg-cyan-50 text-cyan-800 ring-cyan-300',
-  pink:    'bg-pink-50 text-pink-800 ring-pink-300',
-  indigo:  'bg-indigo-50 text-indigo-800 ring-indigo-300',
-  orange:  'bg-orange-50 text-orange-800 ring-orange-300',
 }
 
 function ConfirmDeleteModal({
@@ -158,7 +146,7 @@ export function ManageListsModal({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center gap-3">
                     {/* Color dot for categories */}
                     {activeTab === 'categories' && item.color && (
-                      <span className={`px-3 py-1.5 rounded-full text-xs font-bold ring-1 ring-inset ${colorMap[item.color] || colorMap['slate']}`}>
+                      <span className={`px-3 py-1.5 rounded-full text-xs font-bold ring-1 ring-inset ${categoryColorMap[item.color || 'slate'] || categoryColorMap.slate}`}>
                         {item.name}
                       </span>
                     )}

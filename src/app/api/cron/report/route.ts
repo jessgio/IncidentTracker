@@ -14,7 +14,12 @@ const ai = new OpenAI({
 })
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`. Reject anything else.
+  if (req.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     // 1. Calculate Timestamps
     const today = new Date()
@@ -115,9 +120,15 @@ export async function GET() {
     `
 
     // 7. Send Email via Resend
+    const reportFrom = process.env.REPORT_FROM || 'Incident Tracker <reports@aerisbeaute.com>'
+    const reportRecipients = (process.env.REPORT_RECIPIENTS || 'jsc.giovanni@gmail.com,jessica@aerisbeaute.com')
+      .split(',')
+      .map(addr => addr.trim())
+      .filter(Boolean)
+
     const { data: emailData, error: emailError } = await resend.emails.send({
-      from: 'Incident Tracker <reports@aerisbeaute.com>', // UPDATE ONCE DOMAIN IS VERIFIED
-      to: ['jsc.giovanni@gmail.com, jessica@aerisbeaute.com'], 
+      from: reportFrom,
+      to: reportRecipients,
       subject: `Weekly Incident Report - ${today.toLocaleDateString()}`,
       html: htmlEmail,
     })

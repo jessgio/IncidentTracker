@@ -17,6 +17,8 @@ import { deleteIncident } from '../../../lib/delete-incident'
 import { storagePathFromPublicUrl, type AttachmentItem } from '../../../lib/attachment-utils'
 import { AttachmentGallery } from '../../../components/AttachmentGallery'
 import { WarehouseNotifyModal } from '../../../components/WarehouseNotifyModal'
+import { CsNotifyModal } from '../../../components/CsNotifyModal'
+import type { CsNotifyTemplateId } from '../../../lib/cs-notify-templates'
 
 type Attachment = AttachmentItem
 type Comment = { id: string; comment_text: string; created_at: string; user_id: string; profiles: { full_name: string; email: string } }
@@ -50,6 +52,7 @@ export default function CommentThread({
   const [isUploading, setIsUploading] = useState(false)
   const [isDeletingCase, setIsDeletingCase] = useState(false)
   const [showWarehouseNotify, setShowWarehouseNotify] = useState(false)
+  const [showCsNotify, setShowCsNotify] = useState(false)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -191,13 +194,33 @@ export default function CommentThread({
   const requestWarehouse = () => handleStatusChange(WAITING_ON_WAREHOUSE)
 
   const warehouseMembers = agents.filter(a => a.role === 'warehouse')
+  const csMembers = agents.filter(a => a.role === 'cs' || a.role === 'manager')
   const canNotifyWarehouse = userRole === 'cs' || userRole === 'manager'
+  const canNotifyCs = userRole === 'warehouse'
 
   const sendWarehouseNotify = async (recipientIds: string[], message: string) => {
     const res = await fetch(`/api/incidents/${incidentId}/notify-warehouse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ recipientIds, message }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: (data as { error?: string }).error ?? 'Could not send email.' }
+    }
+    await fetchAll()
+    return { ok: true }
+  }
+
+  const sendCsNotify = async (
+    recipientIds: string[],
+    message: string,
+    templateId: CsNotifyTemplateId
+  ) => {
+    const res = await fetch(`/api/incidents/${incidentId}/notify-cs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientIds, message, templateId }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -247,6 +270,22 @@ export default function CommentThread({
 
   return (
     <div className="app-page">
+      {showCsNotify && (
+        <CsNotifyModal
+          orderNumber={incident.order_number}
+          warehouseStatus={incident.warehouse_status}
+          members={csMembers}
+          assignedPicId={incident.assigned_to}
+          onClose={() => setShowCsNotify(false)}
+          onSend={async (recipientIds, message, templateId) => {
+            const result = await sendCsNotify(recipientIds, message, templateId)
+            if (result.ok) {
+              window.alert(`Email sent to ${recipientIds.length} CS team member${recipientIds.length === 1 ? '' : 's'}.`)
+            }
+            return result
+          }}
+        />
+      )}
       {showWarehouseNotify && (
         <WarehouseNotifyModal
           orderNumber={incident.order_number}
@@ -449,8 +488,8 @@ export default function CommentThread({
         {/* WAREHOUSE HANDOFF PANEL */}
         {(waitingOnWarehouse || (userRole === 'warehouse' && sm.isOpen)) && !isEditing && (
           <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl p-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex-1">
                 <h2 className="text-sm font-semibold text-orange-900">Warehouse fulfillment</h2>
                 <p className="text-sm text-orange-800 mt-1">
                   {waitingOnWarehouse
@@ -463,15 +502,26 @@ export default function CommentThread({
                   </p>
                 )}
               </div>
-              <div className="min-w-[200px]">
-                <label className="app-label text-orange-900">Warehouse status</label>
-                <select
-                  value={incident.warehouse_status || ''}
-                  onChange={(e) => handleWarehouseStatusChange(e.target.value)}
-                  className="app-select w-full border-orange-300"
-                >
-                  {WAREHOUSE_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o || 'Select...'}</option>)}
-                </select>
+              <div className="flex flex-col gap-3 min-w-[200px] sm:min-w-[220px]">
+                <div>
+                  <label className="app-label text-orange-900">Warehouse status</label>
+                  <select
+                    value={incident.warehouse_status || ''}
+                    onChange={(e) => handleWarehouseStatusChange(e.target.value)}
+                    className="app-select w-full border-orange-300"
+                  >
+                    {WAREHOUSE_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o || 'Select...'}</option>)}
+                  </select>
+                </div>
+                {canNotifyCs && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCsNotify(true)}
+                    className="w-full text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg transition"
+                  >
+                    Email CS team
+                  </button>
+                )}
               </div>
             </div>
           </div>

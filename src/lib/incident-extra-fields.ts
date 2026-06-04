@@ -105,6 +105,13 @@ export const incidentExtraFields = [
     placeholder: 'JNE / J&T / SiCepat / DHL / etc.',
     tableClass: 'min-w-[140px] whitespace-nowrap',
   },
+  {
+    key: 'shipping_label',
+    label: 'Shipping Label',
+    type: 'text',
+    placeholder: 'Tracking / AWB / label reference',
+    tableClass: 'min-w-[180px] whitespace-nowrap font-mono text-xs',
+  },
 ] as const satisfies readonly {
   key: string
   label: string

@@ -91,6 +91,7 @@ export function statusChangePatch(
 // Extra fields shown in the dashboard table (detail view still shows all).
 export const DASHBOARD_TABLE_EXTRA_KEYS = [
   'warehouse_status',
+  'shipping_label',
   'fault_party',
   'action_taken',
   'bpb_number',

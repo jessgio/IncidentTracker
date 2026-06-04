@@ -54,7 +54,7 @@ export function isOpenStatus(status: string | null | undefined): boolean {
 export type UserRole = 'cs' | 'warehouse' | 'manager'
 
 export function canDeleteIncidents(role: UserRole | string | null | undefined): boolean {
-  return role === 'manager'
+  return role === 'manager' || role === 'cs'
 }
 
 export function statusChangePatch(

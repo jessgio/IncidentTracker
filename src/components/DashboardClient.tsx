@@ -24,11 +24,14 @@ type Attachment = { id: string; file_name: string; file_type: string; file_url: 
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
   order_number: string; complaint_date: string; created_at: string; ai_suggestion: string | null;
+  assigned_to: string | null;
+  profiles?: { full_name: string | null; email: string } | null;
   attachments?: Attachment[]
 } & IncidentExtraDbFields
 
 type Marketplace = { id: string; name: string }
 type Category = { id: string; name: string; color: string }
+type Agent = { id: string; full_name: string | null; email: string }
 
 const tableExtraFields = incidentExtraFields.filter(f =>
   (DASHBOARD_TABLE_EXTRA_KEYS as readonly string[]).includes(f.key)
@@ -108,6 +111,7 @@ export default function DashboardClient({
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS)
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -129,6 +133,7 @@ export default function DashboardClient({
   const [marketplace, setMarketplace] = useState('')
   const [orderNumber, setOrderNumber] = useState('')
   const [complaintDate, setComplaintDate] = useState(new Date().toISOString().split('T')[0])
+  const [assignedTo, setAssignedTo] = useState(userId)
   const [extraForm, setExtraForm] = useState<ExtraFormState>({ ...emptyExtraFormState })
   const [showExtraFields, setShowExtraFields] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -211,7 +216,7 @@ export default function DashboardClient({
     const start = (page - 1) * PAGE_SIZE
     const end = start + PAGE_SIZE - 1
     const query = applyFilters(
-      supabase.from('incidents').select('*, attachments(id, file_name, file_type, file_url)').order('created_at', { ascending: false }).range(start, end),
+      supabase.from('incidents').select('*, profiles(full_name, email), attachments(id, file_name, file_type, file_url)').order('created_at', { ascending: false }).range(start, end),
       f
     )
     const { data } = await query
@@ -221,6 +226,8 @@ export default function DashboardClient({
   const fetchDropdowns = useCallback(async () => {
     const { data: mpData } = await supabase.from('marketplaces').select('*').order('name'); if (mpData) { setMarketplaces(mpData); if (mpData.length > 0 && !marketplace) setMarketplace(mpData[0].name) }
     const { data: catData } = await supabase.from('categories').select('*').order('name'); if (catData) { setCategories(catData); if (catData.length > 0 && !category) setCategory(catData[0].name) }
+    const { data: agentData } = await supabase.from('profiles').select('id, full_name, email').order('full_name')
+    if (agentData) setAgents(agentData)
   }, [supabase])
 
   // Keep the latest callbacks/page in refs so the realtime subscription (set up once)
@@ -294,6 +301,7 @@ export default function DashboardClient({
       .from('incidents')
       .insert([{
         title, category, marketplace, order_number: orderNumber, complaint_date: complaintDate,
+        assigned_to: userRole !== 'warehouse' && assignedTo ? assignedTo : null,
         status: DEFAULT_STATUS, status_changed_at: new Date().toISOString(),
         ...extraFormToDbPayload(extraForm),
       }])
@@ -303,7 +311,7 @@ export default function DashboardClient({
     setIsSubmitting(false)
     if (error) { alert('Could not save the incident. Please try again.'); return }
 
-    setTitle(''); setOrderNumber(''); setExtraForm({ ...emptyExtraFormState }); setShowExtraFields(false); setShowForm(false)
+    setTitle(''); setOrderNumber(''); setAssignedTo(userId); setExtraForm({ ...emptyExtraFormState }); setShowExtraFields(false); setShowForm(false)
 
     // Generate the draft response in the background; the realtime subscription picks up
     // the update once it lands, so saving never blocks on the AI call.
@@ -323,6 +331,24 @@ export default function DashboardClient({
   const handleAddMarketplace = async (name: string) => { const { error } = await supabase.from('marketplaces').insert([{ name }]); if (!error) { setMarketplace(name); setIsAddingMp(false) } else alert('Marketplace already exists.') }
   const handleAddCategory = async (name: string, color?: string) => { const { error } = await supabase.from('categories').insert([{ name, color: color || 'slate' }]); if (!error) { setCategory(name); setIsAddingCat(false) } else alert('Category already exists.') }
   
+  const handleAssigneeChange = async (incidentId: string, assigneeId: string) => {
+    const agent = agents.find(a => a.id === assigneeId)
+    const assigned_to = assigneeId || null
+    const profiles = agent
+      ? { full_name: agent.full_name, email: agent.email }
+      : null
+    setIncidents(prev =>
+      prev.map(inc =>
+        inc.id === incidentId ? { ...inc, assigned_to, profiles } : inc
+      )
+    )
+    await supabase
+      .from('incidents')
+      .update({ assigned_to, updated_at: new Date().toISOString() })
+      .eq('id', incidentId)
+    fetchStats()
+  }
+
   const updateStatus = async (id: string, newStatus: string) => {
     const inc = incidents.find(i => i.id === id)
     const patch = statusChangePatch(newStatus, {
@@ -511,6 +537,17 @@ export default function DashboardClient({
                       <button type="button" onClick={() => setIsAddingMp(true)} className="app-btn-secondary shrink-0 px-3" aria-label="Add marketplace">+</button>
                     </div>}
                   </div>
+                  {userRole !== 'warehouse' && (
+                    <div className="md:col-span-2 lg:col-span-4">
+                      <label className="app-label">Assigned PIC</label>
+                      <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="app-select w-full max-w-md">
+                        <option value="">Unassigned</option>
+                        {agents.map(a => (
+                          <option key={a.id} value={a.id}>{a.full_name || a.email}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-zinc-100 pt-4 mt-2">
@@ -551,13 +588,16 @@ export default function DashboardClient({
         </p>
         <div className="app-card overflow-hidden relative">
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[1200px] border-collapse relative">
+            <table className="w-full min-w-[1320px] border-collapse relative">
               <thead className="bg-zinc-50 border-b border-zinc-200">
                 <tr>
                   <th className="sticky left-0 z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[240px] min-w-[240px]">Incident</th>
                   <th className="sticky left-[240px] z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[120px] min-w-[120px]">Media</th>
                   <th className="sticky left-[360px] z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[140px] min-w-[140px] border-r border-zinc-200 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">Order #</th>
                   {['Date', 'Category', 'Marketplace'].map(h => <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{h}</th>)}
+                  {userRole !== 'warehouse' && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap min-w-[150px]">PIC</th>
+                  )}
                   {tableExtraFields.map(f => <th key={f.key} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{f.label}</th>)}
                   <th className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide">Status</th>
                   {canDeleteCases && (
@@ -568,7 +608,7 @@ export default function DashboardClient({
               <tbody className="divide-y divide-zinc-100">
                 {incidents.length === 0 ? (
                   <tr>
-                    <td colSpan={7 + tableExtraFields.length + (canDeleteCases ? 1 : 0)} className="p-10 text-center text-zinc-600">
+                    <td colSpan={7 + tableExtraFields.length + (userRole !== 'warehouse' ? 1 : 0) + (canDeleteCases ? 1 : 0)} className="p-10 text-center text-zinc-600">
                       No incidents found
                     </td>
                   </tr>
@@ -619,6 +659,28 @@ export default function DashboardClient({
                       <td className="px-4 py-3 text-sm text-zinc-700 whitespace-nowrap align-top">{formatDateOnly(inc.complaint_date)}</td>
                       <td className="px-4 py-3 align-top"><span className={`px-2.5 py-1 rounded-full text-xs font-semibold ring-1 ring-inset ${categoryRingStyle(categories.find(c => c.name === inc.category)?.color)}`}>{inc.category}</span></td>
                       <td className="px-4 py-3 text-sm font-medium text-zinc-800 whitespace-nowrap align-top">{inc.marketplace}</td>
+
+                      {userRole !== 'warehouse' && (
+                        <td className="px-2 py-2 align-top min-w-[150px]" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            value={inc.assigned_to || ''}
+                            onChange={(e) => {
+                              e.stopPropagation()
+                              void handleAssigneeChange(inc.id, e.target.value)
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="app-select w-full max-w-[180px] text-xs py-1.5"
+                            aria-label={`Assign PIC for order ${inc.order_number}`}
+                          >
+                            <option value="">Unassigned</option>
+                            {agents.map(a => (
+                              <option key={a.id} value={a.id}>
+                                {a.full_name || a.email}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
                       
                       {tableExtraFields.map(field => {
                         const value = inc[field.key as keyof IncidentExtraDbFields]

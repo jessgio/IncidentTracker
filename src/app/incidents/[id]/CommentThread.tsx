@@ -18,6 +18,8 @@ import { storagePathFromPublicUrl, type AttachmentItem } from '../../../lib/atta
 import { AttachmentGallery } from '../../../components/AttachmentGallery'
 import { WarehouseNotifyModal } from '../../../components/WarehouseNotifyModal'
 import { CsNotifyModal } from '../../../components/CsNotifyModal'
+import { CommentBody } from '../../../components/CommentBody'
+import { MentionTextarea } from '../../../components/MentionTextarea'
 import type { CsNotifyTemplateId } from '../../../lib/cs-notify-templates'
 
 type Attachment = AttachmentItem
@@ -149,10 +151,28 @@ export default function CommentThread({
     setAttachments(prev => prev.filter(a => a.id !== attachment.id))
   }
 
-  const handleSubmitComment = async (e: React.FormEvent) => {
-    e.preventDefault(); if (!newComment.trim()) return; setIsSubmitting(true)
-    await supabase.from('comments').insert([{ incident_id: incidentId, user_id: currentUserId, comment_text: newComment.trim() }])
-    setNewComment(''); setIsSubmitting(false)
+  const handleSubmitComment = async (e?: React.FormEvent) => {
+    e?.preventDefault()
+    const text = newComment.trim()
+    if (!text) return
+    setIsSubmitting(true)
+    const res = await fetch(`/api/incidents/${incidentId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commentText: text }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      window.alert((data as { error?: string }).error ?? 'Could not post comment.')
+      setIsSubmitting(false)
+      return
+    }
+    if ((data as { emailFailures?: string[] }).emailFailures?.length) {
+      console.warn('Some mention emails failed:', (data as { emailFailures: string[] }).emailFailures)
+    }
+    setNewComment('')
+    await fetchAll()
+    setIsSubmitting(false)
   }
 
   const handleStatusChange = async (newStatus: string) => {
@@ -584,7 +604,16 @@ export default function CommentThread({
                   <div className="w-9">{showAv && <div className="w-9 h-9 rounded-full bg-zinc-200 text-zinc-800 text-xs font-semibold flex items-center justify-center border border-white">{comment.profiles?.full_name ? comment.profiles.full_name[0] : 'A'}</div>}</div>
                   <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                     {showAv && <div className={`flex gap-2 mb-1 ${isMe ? 'flex-row-reverse' : ''}`}><span className="text-xs font-semibold text-zinc-800">{isMe ? 'You' : comment.profiles?.full_name}</span><span className="text-xs text-zinc-500">{formatTime(comment.created_at)}</span></div>}
-                    <div className={`px-4 py-2.5 rounded-xl text-sm border ${isMe ? 'bg-blue-600 border-blue-700 text-white rounded-br-sm' : 'bg-zinc-100 border-zinc-200 text-zinc-900 rounded-bl-sm'}`}>{comment.comment_text}</div>
+                    <div className={`px-4 py-2.5 rounded-xl text-sm border whitespace-pre-wrap ${isMe ? 'bg-blue-600 border-blue-700 text-white rounded-br-sm' : 'bg-zinc-100 border-zinc-200 text-zinc-900 rounded-bl-sm'}`}>
+                      <CommentBody
+                        text={comment.comment_text}
+                        highlightClassName={
+                          isMe
+                            ? 'font-semibold underline decoration-white/40'
+                            : 'font-semibold text-blue-700'
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
               )
@@ -593,8 +622,17 @@ export default function CommentThread({
           </div>
           <div className="px-5 py-4 border-t border-zinc-100 bg-zinc-50 rounded-b-xl">
             <form onSubmit={handleSubmitComment} className="flex gap-2 items-end">
-               <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmitComment(e) } }} placeholder="Write a comment…" rows={1} className="app-input flex-1 resize-none min-h-[44px] rounded-xl" />
-              <button type="submit" disabled={isSubmitting || !newComment.trim()} className="app-btn-primary shrink-0 h-[44px] w-12 rounded-xl px-0" aria-label="Send comment">↑</button>
+              <MentionTextarea
+                value={newComment}
+                onChange={setNewComment}
+                members={agents}
+                currentUserId={currentUserId}
+                disabled={isSubmitting}
+                placeholder="Write a comment… (type @ to mention)"
+                className="app-input w-full resize-none min-h-[44px] rounded-xl"
+                onSubmit={() => void handleSubmitComment()}
+              />
+              <button type="submit" disabled={isSubmitting || !newComment.trim()} className="app-btn-primary shrink-0 h-[44px] w-12 rounded-xl px-0 self-start mt-0" aria-label="Send comment">↑</button>
             </form>
           </div>
         </div>

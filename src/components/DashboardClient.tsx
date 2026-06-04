@@ -42,6 +42,19 @@ type Agent = { id: string; full_name: string | null; email: string }
 const tableExtraFields = incidentExtraFields.filter(f =>
   (DASHBOARD_TABLE_EXTRA_KEYS as readonly string[]).includes(f.key)
 )
+const actionTableField = incidentExtraFields.find(f => f.key === 'action_taken')!
+
+function dashboardTableColCount(opts: { hasPic: boolean; hasDelete: boolean }) {
+  return (
+    3 + // Incident, Media, Order #
+    3 + // Date, Category, Marketplace
+    (opts.hasPic ? 1 : 0) +
+    1 + // Status
+    1 + // Action
+    tableExtraFields.length +
+    (opts.hasDelete ? 1 : 0)
+  )
+}
 
 const DASHBOARD_TH = 'text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap'
 const DASHBOARD_TABLE_MIN_W = 2520
@@ -748,10 +761,11 @@ export default function DashboardClient({
                   {userRole !== 'warehouse' && (
                     <th className={`${DASHBOARD_TH} ${dashboardCoreCols.pic.th}`}>PIC</th>
                   )}
+                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.status.th}`}>Status</th>
+                  <th className={extraFieldHeaderClass(actionTableField.tableClass)}>{actionTableField.label}</th>
                   {tableExtraFields.map(f => (
                     <th key={f.key} className={extraFieldHeaderClass(f.tableClass)}>{f.label}</th>
                   ))}
-                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.status.th}`}>Status</th>
                   {canDeleteCases && (
                     <th className={`${DASHBOARD_TH} text-right ${dashboardCoreCols.actions.th}`}>Actions</th>
                   )}
@@ -760,7 +774,13 @@ export default function DashboardClient({
               <tbody className="divide-y divide-zinc-100">
                 {incidents.length === 0 ? (
                   <tr>
-                    <td colSpan={7 + tableExtraFields.length + (userRole !== 'warehouse' ? 1 : 0) + (canDeleteCases ? 1 : 0)} className="p-10 text-center text-zinc-600">
+                    <td
+                      colSpan={dashboardTableColCount({
+                        hasPic: userRole !== 'warehouse',
+                        hasDelete: canDeleteCases,
+                      })}
+                      className="p-10 text-center text-zinc-600"
+                    >
                       No incidents found
                     </td>
                   </tr>
@@ -842,15 +862,6 @@ export default function DashboardClient({
                           </select>
                         </td>
                       )}
-                      
-                      {tableExtraFields.map(field => {
-                        const value = inc[field.key as keyof IncidentExtraDbFields]
-                        return (
-                          <td key={field.key} className={extraFieldCellClass(field.tableClass)}>
-                            <EditableCell field={field} value={value} onSave={(newVal) => updateIncidentField(inc.id, field.key, newVal)} />
-                          </td>
-                        )
-                      })}
 
                       <td className={dashboardCoreCols.status.td} onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-flex max-w-full">
@@ -861,6 +872,22 @@ export default function DashboardClient({
                           <select value={inc.status} onChange={(e) => { e.stopPropagation(); updateStatus(inc.id, e.target.value) }} onClick={(e)=>e.stopPropagation()} className="absolute inset-0 opacity-0 w-full cursor-pointer">{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
                         </div>
                       </td>
+                      <td className={extraFieldCellClass(actionTableField.tableClass)}>
+                        <EditableCell
+                          field={actionTableField}
+                          value={inc.action_taken}
+                          onSave={(newVal) => updateIncidentField(inc.id, 'action_taken', newVal)}
+                        />
+                      </td>
+
+                      {tableExtraFields.map(field => {
+                        const value = inc[field.key as keyof IncidentExtraDbFields]
+                        return (
+                          <td key={field.key} className={extraFieldCellClass(field.tableClass)}>
+                            <EditableCell field={field} value={value} onSave={(newVal) => updateIncidentField(inc.id, field.key, newVal)} />
+                          </td>
+                        )
+                      })}
                       {canDeleteCases && (
                         <td className={dashboardCoreCols.actions.td} onClick={(e) => e.stopPropagation()}>
                           <button

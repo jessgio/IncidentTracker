@@ -19,8 +19,9 @@ import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
 import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
 import {
-  buildImportTemplateCsv,
-  parseImportCsv,
+  buildImportTemplateXlsx,
+  parseImportFile,
+  isImportFile,
   importRowToInsertPayload,
   getExportHeaders,
 } from '../lib/incident-import'
@@ -453,19 +454,34 @@ export default function DashboardClient({
     URL.revokeObjectURL(url)
   }
 
-  const handleDownloadImportTemplate = () => {
-    downloadCsvBlob(buildImportTemplateCsv(), 'incident-import-template.csv')
+  const handleDownloadImportTemplate = async () => {
+    try {
+      const buffer = await buildImportTemplateXlsx()
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'incident-import-template.xlsx'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Could not download the template. Please try again.')
+    }
   }
 
   const handleImportFile = async (file: File) => {
-    if (!/\.(csv|txt)$/i.test(file.name)) {
-      alert('Upload a CSV file. In Excel: File → Save As → CSV UTF-8 (comma delimited).')
+    if (!isImportFile(file.name)) {
+      alert('Upload an Excel (.xlsx) or CSV file using the import template columns.')
       return
     }
 
     setIsImporting(true)
     try {
-      const { rows, errors } = parseImportCsv(await file.text())
+      const { rows, errors } = await parseImportFile(file)
       const catNames = new Set(categories.map(c => c.name))
       const mpNames = new Set(marketplaces.map(m => m.name))
       const listErrors: string[] = []
@@ -575,12 +591,12 @@ export default function DashboardClient({
               className="app-btn-secondary disabled:opacity-50"
               title={userRole === 'warehouse' ? 'Import is available to CS and manager roles' : undefined}
             >
-              {isImporting ? 'Importing…' : 'Import CSV'}
+              {isImporting ? 'Importing…' : 'Import'}
             </button>
             <input
               ref={importInputRef}
               type="file"
-              accept=".csv,text/csv,text/plain"
+              accept=".csv,.txt,.xlsx,.xls,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0]

@@ -70,6 +70,65 @@ export function buildImportTemplateCsv() {
   return `\uFEFF${headers.join(',')}\n${example.join(',')}\n`
 }
 
+export function isExcelImportFile(name: string) {
+  return /\.(xlsx|xls)$/i.test(name)
+}
+
+export function isImportFile(name: string) {
+  return /\.(csv|txt|xlsx|xls)$/i.test(name)
+}
+
+function importCellToString(value: unknown): string {
+  if (value == null || value === '') return ''
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[0]
+  }
+  return String(value).trim()
+}
+
+/** Build an .xlsx template (browser download or server). */
+export async function buildImportTemplateXlsx(): Promise<ArrayBuffer> {
+  const XLSX = await import('xlsx')
+  const headers = getImportTemplateHeaders()
+  const example = INCIDENT_IMPORT_COLUMNS.map(c => c.example ?? '')
+  const sheet = XLSX.utils.aoa_to_sheet([headers, example])
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Incidents')
+  return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer
+}
+
+export async function parseImportExcel(buffer: ArrayBuffer): Promise<{
+  rows: ParsedImportRow[]
+  errors: ImportRowError[]
+}> {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) {
+    return { rows: [], errors: [{ rowNumber: 0, message: 'Workbook has no sheets.' }] }
+  }
+  const sheet = workbook.Sheets[sheetName]
+  const table = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    defval: '',
+    raw: false,
+  }) as unknown[][]
+  const grid = table.map(row =>
+    (Array.isArray(row) ? row : []).map(importCellToString)
+  )
+  return parseImportTable(grid)
+}
+
+export async function parseImportFile(file: File): Promise<{
+  rows: ParsedImportRow[]
+  errors: ImportRowError[]
+}> {
+  if (isExcelImportFile(file.name)) {
+    return parseImportExcel(await file.arrayBuffer())
+  }
+  return parseImportCsv(await file.text())
+}
+
 export type ParsedImportRow = {
   rowNumber: number
   title: string
@@ -84,7 +143,30 @@ export type ParsedImportRow = {
 
 export type ImportRowError = { rowNumber: number; message: string }
 
-function parseCsvLine(line: string): string[] {
+type CsvDelimiter = ',' | ';' | '\t'
+
+function detectCsvDelimiter(headerLine: string): CsvDelimiter {
+  const counts: Record<CsvDelimiter, number> = { ',': 0, ';': 0, '\t': 0 }
+  let inQuotes = false
+  for (let i = 0; i < headerLine.length; i++) {
+    const ch = headerLine[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (headerLine[i + 1] === '"') i++
+        else inQuotes = false
+      }
+    } else if (ch === '"') {
+      inQuotes = true
+    } else if (ch === ',' || ch === ';' || ch === '\t') {
+      counts[ch]++
+    }
+  }
+  if (counts[';'] > counts[','] && counts[';'] > counts['\t']) return ';'
+  if (counts['\t'] > counts[',']) return '\t'
+  return ','
+}
+
+function parseCsvLine(line: string, delimiter: CsvDelimiter = ','): string[] {
   const out: string[] = []
   let cur = ''
   let inQuotes = false
@@ -103,7 +185,7 @@ function parseCsvLine(line: string): string[] {
       }
     } else if (ch === '"') {
       inQuotes = true
-    } else if (ch === ',') {
+    } else if (ch === delimiter) {
       out.push(cur)
       cur = ''
     } else {
@@ -126,18 +208,48 @@ export function parseImportCsv(text: string): {
     return { rows: [], errors: [{ rowNumber: 0, message: 'Add at least one data row below the header row.' }] }
   }
 
-  const headerCells = parseCsvLine(lines[0])
+  const delimiter = detectCsvDelimiter(lines[0])
+  const grid = lines.map(line => parseCsvLine(line, delimiter))
+  return parseImportTable(grid, { delimiter })
+}
+
+export function parseImportTable(
+  grid: string[][],
+  options?: { delimiter?: CsvDelimiter }
+): {
+  rows: ParsedImportRow[]
+  errors: ImportRowError[]
+} {
+  const nonEmpty = grid.filter(row => row.some(cell => cell.trim() !== ''))
+  if (nonEmpty.length === 0) {
+    return { rows: [], errors: [{ rowNumber: 0, message: 'File is empty.' }] }
+  }
+  if (nonEmpty.length < 2) {
+    return { rows: [], errors: [{ rowNumber: 0, message: 'Add at least one data row below the header row.' }] }
+  }
+
+  const headerCells = nonEmpty[0].map(cell => cell.trim())
   const keyIndexes: (string | null)[] = headerCells.map(cell => {
     const key = LABEL_TO_KEY.get(normalizeHeader(cell))
     return key ?? null
   })
 
-  if (!keyIndexes.includes('title') || !keyIndexes.includes('order_number') || !keyIndexes.includes('complaint_date')) {
+  const hasRequiredColumns =
+    keyIndexes.includes('title') &&
+    keyIndexes.includes('order_number') &&
+    keyIndexes.includes('complaint_date')
+
+  if (!hasRequiredColumns) {
+    const excelHint =
+      options?.delimiter === ';'
+        ? ' Excel saved this file with semicolons instead of commas — use File → Save As → CSV UTF-8 (comma delimited), or upload .xlsx directly.'
+        : ''
     return {
       rows: [],
       errors: [{
         rowNumber: 0,
-        message: 'Missing required columns. Use the import template (Title, Order Number, Date).',
+        message:
+          `Missing required columns. Use the import template (Title, Order Number, Date).${excelHint}`,
       }],
     }
   }
@@ -145,9 +257,9 @@ export function parseImportCsv(text: string): {
   const rows: ParsedImportRow[] = []
   const errors: ImportRowError[] = []
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = 1; i < nonEmpty.length; i++) {
     const rowNumber = i + 1
-    const cells = parseCsvLine(lines[i])
+    const cells = nonEmpty[i]
     const record: Record<string, string> = {}
     keyIndexes.forEach((key, idx) => {
       if (key) record[key] = (cells[idx] ?? '').trim()
@@ -287,5 +399,6 @@ export function getImportFieldGuide() {
     ...selectFields,
     'Money columns: numbers only (no currency symbols).',
     'Delete the example row before importing your cases.',
+    'You can import .xlsx or .csv — use the Excel template download to avoid CSV delimiter issues.',
   ]
 }

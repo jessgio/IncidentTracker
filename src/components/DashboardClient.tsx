@@ -18,6 +18,12 @@ import {
 import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
 import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
+import {
+  buildImportTemplateCsv,
+  parseImportCsv,
+  importRowToInsertPayload,
+  getExportHeaders,
+} from '../lib/incident-import'
 
 type Attachment = { id: string; file_name: string; file_type: string; file_url: string; created_at: string }
 
@@ -169,7 +175,9 @@ export default function DashboardClient({
   const [isAddingCat, setIsAddingCat] = useState(false)
   const [showManageLists, setShowManageLists] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   const supabase = createClient()
   const router = useRouter()
@@ -420,6 +428,86 @@ export default function DashboardClient({
     [categories]
   )
 
+  const downloadCsvBlob = (csv: string, filename: string) => {
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadImportTemplate = () => {
+    downloadCsvBlob(buildImportTemplateCsv(), 'incident-import-template.csv')
+  }
+
+  const handleImportFile = async (file: File) => {
+    if (!/\.(csv|txt)$/i.test(file.name)) {
+      alert('Upload a CSV file. In Excel: File → Save As → CSV UTF-8 (comma delimited).')
+      return
+    }
+
+    setIsImporting(true)
+    try {
+      const { rows, errors } = parseImportCsv(await file.text())
+      const catNames = new Set(categories.map(c => c.name))
+      const mpNames = new Set(marketplaces.map(m => m.name))
+      const listErrors: string[] = []
+
+      for (const row of rows) {
+        if (!catNames.has(row.category)) {
+          listErrors.push(`Row ${row.rowNumber}: unknown category "${row.category}". Add it under Manage lists.`)
+        }
+        if (!mpNames.has(row.marketplace)) {
+          listErrors.push(`Row ${row.rowNumber}: unknown marketplace "${row.marketplace}". Add it under Manage lists.`)
+        }
+      }
+
+      const allErrors = [...errors.map(e => `Row ${e.rowNumber}: ${e.message}`), ...listErrors]
+      if (allErrors.length) {
+        alert(allErrors.slice(0, 8).join('\n') + (allErrors.length > 8 ? `\n…and ${allErrors.length - 8} more.` : ''))
+        return
+      }
+      if (rows.length === 0) {
+        alert('No data rows found. Use the template, fill in your cases, and remove the example row.')
+        return
+      }
+      if (!confirm(`Import ${rows.length} incident${rows.length === 1 ? '' : 's'}?`)) return
+
+      const agentLookup = agents.map(a => ({ id: a.id, email: a.email }))
+      const BATCH = 50
+      let imported = 0
+
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const chunk = rows.slice(i, i + BATCH).map(row =>
+          importRowToInsertPayload(row, agentLookup, userId, userRole)
+        )
+        const { error } = await supabase.from('incidents').insert(chunk)
+        if (error) {
+          alert(`Import stopped after ${imported} row(s): ${error.message}`)
+          break
+        }
+        imported += chunk.length
+      }
+
+      if (imported > 0) {
+        alert(`Imported ${imported} incident${imported === 1 ? '' : 's'}.`)
+        setCurrentPage(1)
+        currentPageRef.current = 1
+        await fetchPage(1)
+        fetchStats()
+      }
+    } catch {
+      alert('Could not read the file. Please try again.')
+    } finally {
+      setIsImporting(false)
+      if (importInputRef.current) importInputRef.current.value = ''
+    }
+  }
+
   const handleExport = async () => {
     setIsExporting(true); const CHUNK = 1000; let allRows: Incident[] = []; let fromIdx = 0; let keepGoing = true
     try {
@@ -428,9 +516,21 @@ export default function DashboardClient({
         const query = applyFilters(supabase.from('incidents').select('*').order('created_at', { ascending: false }).range(fromIdx, fromIdx + CHUNK - 1), exportFilters)
         const { data } = await query; if (!data || data.length === 0) keepGoing = false; else { allRows = [...allRows, ...data]; if (data.length < CHUNK) keepGoing = false; else fromIdx += CHUNK }
       }
-      const headers = ['Title', 'Order Number', 'Date', 'Category', 'Marketplace', ...incidentExtraFields.map(f => f.label), 'Status', 'Draft Response', 'Created At']
-      const csvRows = [headers.join(','), ...allRows.map(row => [csvEscape(row.title), csvEscape(row.order_number), csvEscape(row.complaint_date), csvEscape(row.category), csvEscape(row.marketplace), ...incidentExtraFields.map(f => csvEscape(row[f.key as keyof IncidentExtraDbFields])), csvEscape(row.status), csvEscape(row.ai_suggestion), csvEscape(row.created_at)].join(','))]
-      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `incidents-export-${new Date().toISOString().split('T')[0]}.csv`; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url)
+      const headers = getExportHeaders()
+      const picEmailById = Object.fromEntries(agents.map(a => [a.id, a.email]))
+      const csvRows = [headers.join(','), ...allRows.map(row => [
+        csvEscape(row.title),
+        csvEscape(row.order_number),
+        csvEscape(row.complaint_date),
+        csvEscape(row.category),
+        csvEscape(row.marketplace),
+        csvEscape(row.assigned_to ? picEmailById[row.assigned_to] ?? '' : ''),
+        ...incidentExtraFields.map(f => csvEscape(row[f.key as keyof IncidentExtraDbFields])),
+        csvEscape(row.status),
+        csvEscape(row.ai_suggestion),
+        csvEscape(row.created_at),
+      ].join(','))]
+      downloadCsvBlob(csvRows.join('\n'), `incidents-export-${new Date().toISOString().split('T')[0]}.csv`)
     } catch(err) { alert('Export failed. Please try again.') }
     setIsExporting(false)
   }
@@ -452,6 +552,28 @@ export default function DashboardClient({
             <span className="app-chip">
               {userRole === 'warehouse' ? 'Warehouse' : userRole === 'manager' ? 'Manager' : 'CS'}
             </span>
+            <button type="button" onClick={handleDownloadImportTemplate} className="app-btn-secondary">
+              Download import template
+            </button>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={isImporting || userRole === 'warehouse'}
+              className="app-btn-secondary disabled:opacity-50"
+              title={userRole === 'warehouse' ? 'Import is available to CS and manager roles' : undefined}
+            >
+              {isImporting ? 'Importing…' : 'Import CSV'}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".csv,text/csv,text/plain"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handleImportFile(file)
+              }}
+            />
             <button onClick={handleExport} disabled={isExporting} className="app-btn-secondary">
               {isExporting ? 'Exporting…' : 'Export CSV'}
             </button>

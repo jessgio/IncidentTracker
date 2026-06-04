@@ -1,4 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { STATUS_VALUES } from './incident-status'
+
+const OPEN_STATUSES = STATUS_VALUES.filter(s => s !== 'Resolved' && s !== 'Closed')
+const CLOSED_STATUSES = ['Resolved', 'Closed'] as const
 
 export type ChartRow = { name: string; count: number; percentage?: number }
 
@@ -66,6 +70,21 @@ export function formatHours(hours: number | null | undefined): string {
   if (hours < 1) return `${Math.round(hours * 60)}m`
   if (hours < 48) return `${hours.toFixed(1)}h`
   return `${(hours / 24).toFixed(1)}d`
+}
+
+function statusCounts(byStatus: ChartRow[], names: readonly string[]): ChartRow[] {
+  const byName = Object.fromEntries(byStatus.map(r => [r.name, r.count]))
+  return names.map(name => ({ name, count: byName[name] ?? 0 }))
+}
+
+/** Open-case counts per status, in lifecycle order (excludes Resolved / Closed). */
+export function openStatusBreakdown(byStatus: ChartRow[]): ChartRow[] {
+  return statusCounts(byStatus, OPEN_STATUSES)
+}
+
+/** Resolved and closed counts (still within current dashboard filters). */
+export function closedStatusBreakdown(byStatus: ChartRow[]): ChartRow[] {
+  return statusCounts(byStatus, CLOSED_STATUSES)
 }
 
 export function weeklyFlowLabel(opened: number, resolved: number): string {

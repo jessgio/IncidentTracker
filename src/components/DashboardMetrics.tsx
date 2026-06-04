@@ -10,7 +10,10 @@ import {
 import {
   formatHours,
   weeklyFlowLabel,
+  openStatusBreakdown,
+  closedStatusBreakdown,
   type DashboardStats,
+  type ChartRow,
   type PicWorkload,
 } from '../lib/dashboard-stats'
 
@@ -91,12 +94,98 @@ function statusCountsForPic(pic: PicWorkload) {
     .filter(s => s.count > 0)
 }
 
+function StatusBreakdownList({
+  rows,
+  total,
+  emptyLabel,
+}: {
+  rows: ChartRow[]
+  total: number
+  emptyLabel: string
+}) {
+  if (rows.length === 0) {
+    return <p className="text-xs text-zinc-500">{emptyLabel}</p>
+  }
+  return (
+    <ul className="space-y-2">
+      {rows.map(row => {
+        const sm = statusMeta(row.name)
+        const pct = total > 0 ? Math.round((row.count / total) * 100) : 0
+        return (
+          <li key={row.name}>
+            <div className="flex items-center justify-between gap-2 text-xs mb-1">
+              <span className={`inline-flex items-center gap-1.5 font-semibold truncate ${sm.badge} px-2 py-0.5 rounded-md ring-1 ring-inset`}>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sm.dot}`} />
+                <span className="truncate">{row.name}</span>
+              </span>
+              <span className={`shrink-0 tabular-nums font-semibold ${row.count === 0 ? 'text-zinc-400' : 'text-zinc-800'}`}>
+                {row.count}
+                <span className="text-zinc-500 font-medium ml-1">({pct}%)</span>
+              </span>
+            </div>
+            <div className="w-full bg-zinc-100 rounded-full h-1.5">
+              <div className={`h-1.5 rounded-full ${sm.solid}`} style={{ width: `${pct}%` }} />
+            </div>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+function OpenStatCard({ stats }: { stats: DashboardStats }) {
+  const openRows = openStatusBreakdown(stats.by_status).filter(r => r.count > 0)
+  const closedRows = closedStatusBreakdown(stats.by_status)
+  const totalOpen = stats.total_open
+  const totalClosed = closedRows.reduce((n, r) => n + r.count, 0)
+  const totalAll = stats.total_all
+
+  return (
+    <div className="p-4 rounded-xl border shadow-sm bg-white border-zinc-200">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 shrink-0">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Cases in filter</p>
+            <p className="text-3xl font-semibold tabular-nums text-zinc-900 mt-0.5">{totalAll}</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Open</p>
+            <p className="text-3xl font-semibold tabular-nums text-zinc-900 mt-0.5">{totalOpen}</p>
+            <p className="text-xs font-medium text-zinc-500">ongoing</p>
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Resolved / closed</p>
+            <p className={`text-3xl font-semibold tabular-nums mt-0.5 ${totalClosed > 0 ? 'text-emerald-800' : 'text-zinc-400'}`}>
+              {totalClosed}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0 border-t sm:border-t-0 sm:border-l border-zinc-100 pt-4 sm:pt-0 sm:pl-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">By open status</p>
+            <StatusBreakdownList
+              rows={openRows}
+              total={totalOpen}
+              emptyLabel="No open cases in the current filter."
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">Resolved & closed</p>
+            <StatusBreakdownList rows={closedRows} total={totalAll} emptyLabel="" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PicWorkloadCard({ rows, totalOpen }: { rows: PicWorkload[]; totalOpen: number }) {
   const unassigned = rows.find(p => p.pic_name === 'Unassigned')
   const assigned = rows.filter(p => p.pic_name !== 'Unassigned')
 
   return (
-    <div className="app-card p-5 lg:col-span-3">
+    <div className="app-card p-5">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h3 className="text-sm font-semibold text-zinc-900">Active workload by PIC</h3>
@@ -169,15 +258,13 @@ function PicWorkloadCard({ rows, totalOpen }: { rows: PicWorkload[]; totalOpen: 
 }
 
 export default function DashboardMetrics({ stats, categoryColors }: Props) {
-  const openStatuses = stats.by_status.filter(s =>
-    !['Resolved', 'Closed'].includes(s.name)
-  )
   const flowNet = stats.trend.this_week_resolved - stats.trend.this_week
 
   return (
-    <div className="space-y-4 mb-8">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="Open" value={stats.total_open} sub={`${stats.total_all} in filter`} />
+    <div className="space-y-3 mb-8">
+      <OpenStatCard stats={stats} />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="SLA breaches"
           value={stats.sla_breaches}
@@ -202,6 +289,17 @@ export default function DashboardMetrics({ stats, categoryColors }: Props) {
           labelClass="text-blue-800"
         />
         <StatCard
+          label="Financial impact"
+          value={formatIdr(stats.financial_impact)}
+          sub="refunds + fees"
+          className="bg-violet-50 border-violet-200"
+          valueClass="text-violet-900 text-lg"
+          labelClass="text-violet-800"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <StatCard
           label="Avg first response"
           value={formatHours(stats.avg_first_response_hours)}
           sub={stats.first_response_count > 0 ? `${stats.first_response_count} cases with activity` : 'comment or status update'}
@@ -222,17 +320,9 @@ export default function DashboardMetrics({ stats, categoryColors }: Props) {
           value={formatHours(stats.avg_resolution_hours)}
           sub="created → resolved"
         />
-        <StatCard
-          label="Financial impact"
-          value={formatIdr(stats.financial_impact)}
-          sub="refunds + fees"
-          className="bg-violet-50 border-violet-200"
-          valueClass="text-violet-900 text-lg"
-          labelClass="text-violet-800"
-        />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="app-card p-5">
           <h3 className="text-sm font-semibold text-zinc-900 mb-3">Open case aging</h3>
           <div className="space-y-2">
@@ -288,23 +378,12 @@ export default function DashboardMetrics({ stats, categoryColors }: Props) {
               ))}
             </div>
           )}
-          {openStatuses.length > 0 && (
-            <div className="mt-4 pt-3 border-t border-zinc-100 flex flex-wrap gap-1.5">
-              {openStatuses.slice(0, 4).map(s => (
-                <span key={s.name} className="text-[10px] font-semibold bg-zinc-100 text-zinc-700 px-2 py-1 rounded-md">
-                  {s.name}: {s.count}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <PicWorkloadCard rows={stats.by_pic} totalOpen={stats.total_open} />
-      </div>
+      <PicWorkloadCard rows={stats.by_pic} totalOpen={stats.total_open} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <BarChart
           title="By category"
           rows={stats.by_category}

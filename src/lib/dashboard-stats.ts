@@ -2,12 +2,30 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type ChartRow = { name: string; count: number; percentage?: number }
 
+export type PicWorkload = {
+  pic_id: string | null
+  pic_name: string
+  total_active: number
+  by_status: ChartRow[]
+}
+
+export type DashboardTrend = {
+  this_week: number
+  last_week: number
+  this_week_resolved: number
+  last_week_resolved: number
+}
+
 export type DashboardStats = {
   total_all: number
   total_open: number
   waiting_on_warehouse: number
   sla_breaches: number
   avg_resolution_hours: number | null
+  avg_first_response_hours: number | null
+  first_response_count: number
+  avg_warehouse_cycle_hours: number | null
+  warehouse_cycle_count: number
   financial_impact: number
   my_queue: number
   by_status: ChartRow[]
@@ -16,7 +34,8 @@ export type DashboardStats = {
   by_marketplace: ChartRow[]
   by_fault: ChartRow[]
   by_blocked: ChartRow[]
-  trend: { this_week: number; last_week: number }
+  by_pic: PicWorkload[]
+  trend: DashboardTrend
 }
 
 export const EMPTY_STATS: DashboardStats = {
@@ -25,6 +44,10 @@ export const EMPTY_STATS: DashboardStats = {
   waiting_on_warehouse: 0,
   sla_breaches: 0,
   avg_resolution_hours: null,
+  avg_first_response_hours: null,
+  first_response_count: 0,
+  avg_warehouse_cycle_hours: null,
+  warehouse_cycle_count: 0,
   financial_impact: 0,
   my_queue: 0,
   by_status: [],
@@ -33,7 +56,23 @@ export const EMPTY_STATS: DashboardStats = {
   by_marketplace: [],
   by_fault: [],
   by_blocked: [],
-  trend: { this_week: 0, last_week: 0 },
+  by_pic: [],
+  trend: { this_week: 0, last_week: 0, this_week_resolved: 0, last_week_resolved: 0 },
+}
+
+/** Human-readable duration from hours (RPC returns hours). */
+export function formatHours(hours: number | null | undefined): string {
+  if (hours == null || Number.isNaN(hours)) return '—'
+  if (hours < 1) return `${Math.round(hours * 60)}m`
+  if (hours < 48) return `${hours.toFixed(1)}h`
+  return `${(hours / 24).toFixed(1)}d`
+}
+
+export function weeklyFlowLabel(opened: number, resolved: number): string {
+  const net = resolved - opened
+  if (net > 0) return `Backlog down ${net} — resolving faster than new intake`
+  if (net < 0) return `Backlog up ${Math.abs(net)} — intake outpacing resolution`
+  return 'Intake and resolution balanced this week'
 }
 
 function withPercentages(rows: ChartRow[], total: number): ChartRow[] {
@@ -61,6 +100,10 @@ export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardSta
     waiting_on_warehouse: Number(d.waiting_on_warehouse ?? 0),
     sla_breaches: Number(d.sla_breaches ?? 0),
     avg_resolution_hours: d.avg_resolution_hours != null ? Number(d.avg_resolution_hours) : null,
+    avg_first_response_hours: d.avg_first_response_hours != null ? Number(d.avg_first_response_hours) : null,
+    first_response_count: Number(d.first_response_count ?? 0),
+    avg_warehouse_cycle_hours: d.avg_warehouse_cycle_hours != null ? Number(d.avg_warehouse_cycle_hours) : null,
+    warehouse_cycle_count: Number(d.warehouse_cycle_count ?? 0),
     financial_impact: Number(d.financial_impact ?? 0),
     my_queue: Number(d.my_queue ?? 0),
     by_status: rows('by_status'),
@@ -73,9 +116,24 @@ export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardSta
     by_marketplace: withPercentages(rows('by_marketplace'), totalForPct || total),
     by_fault: withPercentages(rows('by_fault'), totalForPct || total),
     by_blocked: rows('by_blocked'),
+    by_pic: Array.isArray(d.by_pic)
+      ? (d.by_pic as Record<string, unknown>[]).map(row => ({
+          pic_id: row.pic_id != null && row.pic_id !== '' ? String(row.pic_id) : null,
+          pic_name: String(row.pic_name ?? 'Unassigned'),
+          total_active: Number(row.total_active ?? 0),
+          by_status: Array.isArray(row.by_status)
+            ? (row.by_status as { name: string; count: number }[]).map(s => ({
+                name: String(s.name),
+                count: Number(s.count),
+              }))
+            : [],
+        }))
+      : [],
     trend: {
       this_week: Number((d.trend as Record<string, number> | undefined)?.this_week ?? 0),
       last_week: Number((d.trend as Record<string, number> | undefined)?.last_week ?? 0),
+      this_week_resolved: Number((d.trend as Record<string, number> | undefined)?.this_week_resolved ?? 0),
+      last_week_resolved: Number((d.trend as Record<string, number> | undefined)?.last_week_resolved ?? 0),
     },
   }
 }

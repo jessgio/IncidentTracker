@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { createClient } from '../../../utils/supabase/client'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue, formatDateOnly,
@@ -9,10 +10,14 @@ import {
 } from '../../../lib/incident-extra-fields'
 import {
   STATUS_VALUES, WAITING_ON_WAREHOUSE, statusMeta, statusChangePatch, categoryRingStyle,
+  canDeleteIncidents,
   type UserRole,
 } from '../../../lib/incident-status'
+import { deleteIncident } from '../../../lib/delete-incident'
+import { storagePathFromPublicUrl, type AttachmentItem } from '../../../lib/attachment-utils'
+import { AttachmentGallery } from '../../../components/AttachmentGallery'
 
-type Attachment = { id: string; file_name: string; file_type: string; file_url: string; created_at: string }
+type Attachment = AttachmentItem
 type Comment = { id: string; comment_text: string; created_at: string; user_id: string; profiles: { full_name: string; email: string } }
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
@@ -42,6 +47,7 @@ export default function CommentThread({
   const [newComment, setNewComment] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [isDeletingCase, setIsDeletingCase] = useState(false)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -55,6 +61,7 @@ export default function CommentThread({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [comments.length])
 
@@ -107,29 +114,34 @@ export default function CommentThread({
     await fetchAll(); setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const handleDeleteAttachment = async (attachment: Attachment) => {
-    const path = attachment.file_url.split('/incident-attachments/')[1]
-    await supabase.storage.from('incident-attachments').remove([path])
-    await supabase.from('attachments').delete().eq('id', attachment.id)
-    await fetchAll()
+  const handleDeleteCase = async () => {
+    if (!incident || !canDeleteIncidents(userRole)) return
+    const confirmed = window.confirm(
+      `Permanently delete this case?\n\nOrder #${incident.order_number}\n${incident.title}\n\nAll comments and attachments will be removed. This cannot be undone.`
+    )
+    if (!confirmed) return
+    setIsDeletingCase(true)
+    const { ok, error } = await deleteIncident(supabase, incidentId)
+    setIsDeletingCase(false)
+    if (!ok) {
+      window.alert(error ?? 'Could not delete this case. Please try again.')
+      return
+    }
+    router.push('/')
+    router.refresh()
   }
 
-  const downloadFile = async (e: React.MouseEvent, url: string, filename: string) => {
-    e.preventDefault()
-    try {
-      const res = await fetch(url)
-      const blob = await res.blob()
-      const blobUrl = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      window.URL.revokeObjectURL(blobUrl)
-    } catch (err) {
-      window.open(url, '_blank')
+  const handleDeleteAttachment = async (attachment: AttachmentItem) => {
+    const path = storagePathFromPublicUrl(attachment.file_url)
+    if (path) {
+      await supabase.storage.from('incident-attachments').remove([path])
     }
+    const { error } = await supabase.from('attachments').delete().eq('id', attachment.id)
+    if (error) {
+      window.alert('Could not delete this file. Please try again.')
+      return
+    }
+    setAttachments(prev => prev.filter(a => a.id !== attachment.id))
   }
 
   const handleSubmitComment = async (e: React.FormEvent) => {
@@ -153,6 +165,9 @@ export default function CommentThread({
     const patch: Record<string, string | null> = {
       warehouse_status: newWs || null,
       updated_at: new Date().toISOString(),
+    }
+    if (newWs === 'Completed') {
+      patch.warehouse_completed_at = new Date().toISOString()
     }
     if (newWs === 'Completed' && incident.status === WAITING_ON_WAREHOUSE) {
       Object.assign(patch, statusChangePatch('Investigating', {
@@ -209,6 +224,7 @@ export default function CommentThread({
   const sm = statusMeta(incident.status)
   const waitingOnWarehouse = incident.status === WAITING_ON_WAREHOUSE
   const canRequestWarehouse = userRole !== 'warehouse' && !waitingOnWarehouse && sm.isOpen
+  const showDeleteCase = canDeleteIncidents(userRole)
 
   return (
     <div className="app-page">
@@ -390,34 +406,27 @@ export default function CommentThread({
                 <p className="text-sm font-medium text-zinc-600">Click to upload photos and files</p>
               </button>
             ) : (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                {attachments.map(att => {
-                  const isImg = att.file_type.startsWith('image')
-                  return (
-                    <div key={att.id} className="group relative rounded-xl overflow-hidden border border-zinc-200 aspect-square bg-zinc-50 flex items-center justify-center cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title="Click to download">
-                      {isImg ? (
-                        <img src={att.file_url} alt={att.file_name} loading="lazy" decoding="async" className="w-full h-full object-cover group-hover:opacity-90 transition" />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center p-4 h-full hover:bg-zinc-100 transition w-full">
-                          <span className="text-xs font-semibold text-zinc-500 mb-1">File</span>
-                          <span className="text-xs font-medium text-zinc-800 text-center line-clamp-2 px-2">{att.file_name}</span>
-                        </div>
-                      )}
-                      
-                      {/* Download Icon Overlay */}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition focus:outline-none">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-white drop-shadow-md" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                      </div>
-
-                      {/* Delete Button */}
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteAttachment(att); }} className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-rose-500 hover:bg-rose-600 text-white w-7 h-7 rounded-full text-sm font-bold shadow-md transition-all z-10">×</button>
-                    </div>
-                  )
-                })}
-              </div>
+              <AttachmentGallery attachments={attachments} onDelete={handleDeleteAttachment} />
             )}
           </div>
         </div>
+
+        {showDeleteCase && (
+          <div className="app-card border-red-200 bg-red-50/50 p-5 mb-6">
+            <h2 className="text-sm font-semibold text-red-900">Admin: delete case</h2>
+            <p className="text-sm text-red-800/90 mt-1 mb-4">
+              Remove this incident entirely if it was logged by mistake. Only managers can do this.
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleDeleteCase()}
+              disabled={isDeletingCase || isEditing}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition disabled:opacity-50"
+            >
+              {isDeletingCase ? 'Deleting…' : 'Delete this case'}
+            </button>
+          </div>
+        )}
 
         {/* COMMENTS */}
         <div className="app-card">

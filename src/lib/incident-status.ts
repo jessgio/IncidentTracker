@@ -53,6 +53,10 @@ export function isOpenStatus(status: string | null | undefined): boolean {
 // previous resolved_at so closing an already-resolved case keeps its resolution time.
 export type UserRole = 'cs' | 'warehouse' | 'manager'
 
+export function canDeleteIncidents(role: UserRole | string | null | undefined): boolean {
+  return role === 'manager'
+}
+
 export function statusChangePatch(
   newStatus: string,
   prev?: { resolved_at?: string | null; warehouse_status?: string | null }

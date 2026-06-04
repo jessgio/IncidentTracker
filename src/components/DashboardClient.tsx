@@ -12,10 +12,12 @@ import {
 import {
   STATUS_VALUES, DEFAULT_STATUS, WAITING_ON_WAREHOUSE,
   DASHBOARD_TABLE_EXTRA_KEYS, statusMeta, statusChangePatch,
-  categoryRingStyle, CATEGORY_COLOR_OPTIONS,
+  categoryRingStyle, CATEGORY_COLOR_OPTIONS, canDeleteIncidents,
   type UserRole,
 } from '../lib/incident-status'
+import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
+import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
 
 type Attachment = { id: string; file_name: string; file_type: string; file_url: string; created_at: string }
 
@@ -136,9 +138,11 @@ export default function DashboardClient({
   const [isAddingCat, setIsAddingCat] = useState(false)
   const [showManageLists, setShowManageLists] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null)
 
   const supabase = createClient()
   const router = useRouter()
+  const canDeleteCases = canDeleteIncidents(userRole)
 
   const updateExtraForm = (key: ExtraFieldKey, value: string) => setExtraForm(prev => ({ ...prev, [key]: value }))
 
@@ -327,6 +331,27 @@ export default function DashboardClient({
     })
     setIncidents(prev => prev.map(i => i.id === id ? { ...i, ...patch } as Incident : i))
     await supabase.from('incidents').update(patch).eq('id', id)
+  }
+
+  const handleDeleteIncident = async (
+    e: React.MouseEvent,
+    inc: Incident
+  ) => {
+    e.stopPropagation()
+    if (!canDeleteCases) return
+    const confirmed = window.confirm(
+      `Permanently delete this case?\n\nOrder #${inc.order_number}\n${inc.title}\n\nAll comments and attachments will be removed. This cannot be undone.`
+    )
+    if (!confirmed) return
+    setDeletingIncidentId(inc.id)
+    const { ok, error } = await deleteIncident(supabase, inc.id)
+    setDeletingIncidentId(null)
+    if (!ok) {
+      alert(error ?? 'Could not delete this case. Please try again.')
+      return
+    }
+    setIncidents(prev => prev.filter(i => i.id !== inc.id))
+    fetchStats()
   }
 
   const updateIncidentField = async (id: string, key: string, value: string) => {
@@ -535,10 +560,19 @@ export default function DashboardClient({
                   {['Date', 'Category', 'Marketplace'].map(h => <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{h}</th>)}
                   {tableExtraFields.map(f => <th key={f.key} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{f.label}</th>)}
                   <th className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide">Status</th>
+                  {canDeleteCases && (
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[88px]">Actions</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
-                {incidents.length === 0 ? <tr><td colSpan={7 + tableExtraFields.length} className="p-10 text-center text-zinc-600">No incidents found</td></tr> :
+                {incidents.length === 0 ? (
+                  <tr>
+                    <td colSpan={7 + tableExtraFields.length + (canDeleteCases ? 1 : 0)} className="p-10 text-center text-zinc-600">
+                      No incidents found
+                    </td>
+                  </tr>
+                ) :
                 incidents.map(inc => {
                   const sm = statusMeta(inc.status)
                   return (
@@ -551,12 +585,24 @@ export default function DashboardClient({
                           <div className="flex flex-wrap gap-1 mt-0.5">
                             {inc.attachments.slice(0, 3).map(att => {
                               const isImg = att.file_type.startsWith('image')
+                              const canView = canPreviewInline(attachmentKind(att.file_type, att.file_name))
                               return (
-                                <div key={att.id} className="relative w-8 h-8 rounded-md overflow-hidden border border-zinc-200 bg-zinc-100 group/att cursor-pointer" onClick={(e) => downloadFile(e, att.file_url, att.file_name)} title={`Download ${att.file_name}`}>
+                                <div
+                                  key={att.id}
+                                  className="relative w-8 h-8 rounded-md overflow-hidden border border-zinc-200 bg-zinc-100 group/att cursor-pointer"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    if (canView) {
+                                      window.open(att.file_url, '_blank', 'noopener,noreferrer')
+                                    } else {
+                                      downloadFile(e, att.file_url, att.file_name)
+                                    }
+                                  }}
+                                  title={canView ? `View ${att.file_name}` : `Download ${att.file_name}`}
+                                >
                                   {isImg ? <img src={att.file_url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs font-semibold text-zinc-600">PDF</div>}
-                                  {/* Download Icon Overlay */}
-                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/att:opacity-100 flex items-center justify-center transition focus:outline-none">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover/att:opacity-100 flex items-center justify-center transition pointer-events-none">
+                                    <span className="text-[9px] font-bold text-white">View</span>
                                   </div>
                                 </div>
                               )
@@ -589,6 +635,18 @@ export default function DashboardClient({
                           <select value={inc.status} onChange={(e) => { e.stopPropagation(); updateStatus(inc.id, e.target.value) }} onClick={(e)=>e.stopPropagation()} className="absolute inset-0 opacity-0 w-full cursor-pointer">{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
                         </div>
                       </td>
+                      {canDeleteCases && (
+                        <td className="px-4 py-3 text-right align-top" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={(e) => void handleDeleteIncident(e, inc)}
+                            disabled={deletingIncidentId === inc.id}
+                            className="text-xs font-semibold text-red-700 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2.5 py-1.5 rounded-md transition disabled:opacity-50"
+                          >
+                            {deletingIncidentId === inc.id ? '…' : 'Delete'}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}

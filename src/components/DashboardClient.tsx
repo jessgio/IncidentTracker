@@ -37,6 +37,26 @@ const tableExtraFields = incidentExtraFields.filter(f =>
   (DASHBOARD_TABLE_EXTRA_KEYS as readonly string[]).includes(f.key)
 )
 
+const DASHBOARD_TH = 'text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap'
+const DASHBOARD_TABLE_MIN_W = 2520
+
+const dashboardCoreCols = {
+  date: { th: 'min-w-[7.5rem]', td: 'min-w-[7.5rem] w-[7.5rem] px-4 py-3 align-top whitespace-nowrap text-sm text-zinc-700' },
+  category: { th: 'min-w-[10rem]', td: 'min-w-[10rem] w-[10rem] px-4 py-3 align-top' },
+  marketplace: { th: 'min-w-[8.5rem]', td: 'min-w-[8.5rem] w-[8.5rem] px-4 py-3 align-top text-sm font-medium text-zinc-800' },
+  pic: { th: 'min-w-[11rem]', td: 'min-w-[11rem] w-[11rem] px-4 py-3 align-top' },
+  status: { th: 'min-w-[12.5rem]', td: 'min-w-[12.5rem] w-[12.5rem] px-4 py-3 align-top' },
+  actions: { th: 'min-w-[5.5rem] w-[5.5rem]', td: 'min-w-[5.5rem] w-[5.5rem] px-4 py-3 text-right align-top' },
+} as const
+
+function extraFieldHeaderClass(tableClass?: string) {
+  return `${DASHBOARD_TH} ${tableClass ?? 'min-w-[120px]'}`
+}
+
+function extraFieldCellClass(tableClass?: string) {
+  return `px-4 py-3 align-top ${tableClass ?? 'min-w-[120px]'}`
+}
+
 // Helper for cross-origin downloads
 const downloadFile = async (e: React.MouseEvent, url: string, filename: string) => {
   e.stopPropagation() // Prevent row click
@@ -75,9 +95,15 @@ function EditableCell({ field, value, onSave }: { field: any, value: any, onSave
   const handleSave = () => { setIsEditing(false); if (tempVal !== (value ?? '')) onSave(tempVal) }
 
   if (!isEditing) {
+    const display = formatExtraValue(value, field.type)
     return (
-      <div onClick={(e) => { e.stopPropagation(); setIsEditing(true) }} className="px-2 py-1.5 min-h-[32px] rounded-md hover:bg-blue-50 cursor-text transition-colors flex items-center w-full">
-        <span className={!value ? 'text-zinc-500 italic' : 'text-zinc-900 font-medium'}>{formatExtraValue(value, field.type)}</span>
+      <div onClick={(e) => { e.stopPropagation(); setIsEditing(true) }} className="min-h-[32px] rounded-md hover:bg-blue-50 cursor-text transition-colors w-full">
+        <span
+          title={display !== '—' ? display : undefined}
+          className={`block text-sm leading-snug px-1 py-1.5 max-w-full ${field.type === 'textarea' ? 'line-clamp-2 whitespace-normal' : 'truncate'} ${!value ? 'text-zinc-500 italic' : 'text-zinc-900 font-medium'}`}
+        >
+          {display}
+        </span>
       </div>
     )
   }
@@ -588,20 +614,24 @@ export default function DashboardClient({
         </p>
         <div className="app-card overflow-hidden relative">
           <div className="overflow-x-auto w-full">
-            <table className="w-full min-w-[1320px] border-collapse relative">
+            <table className="w-max min-w-full border-collapse relative" style={{ minWidth: DASHBOARD_TABLE_MIN_W }}>
               <thead className="bg-zinc-50 border-b border-zinc-200">
                 <tr>
-                  <th className="sticky left-0 z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[240px] min-w-[240px]">Incident</th>
-                  <th className="sticky left-[240px] z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[120px] min-w-[120px]">Media</th>
-                  <th className="sticky left-[360px] z-30 bg-zinc-50 text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[140px] min-w-[140px] border-r border-zinc-200 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]">Order #</th>
-                  {['Date', 'Category', 'Marketplace'].map(h => <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{h}</th>)}
+                  <th className={`sticky left-0 z-30 bg-zinc-50 ${DASHBOARD_TH} w-[240px] min-w-[240px]`}>Incident</th>
+                  <th className={`sticky left-[240px] z-30 bg-zinc-50 ${DASHBOARD_TH} w-[120px] min-w-[120px]`}>Media</th>
+                  <th className={`sticky left-[360px] z-30 bg-zinc-50 ${DASHBOARD_TH} w-[140px] min-w-[140px] border-r border-zinc-200 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>Order #</th>
+                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.date.th}`}>Date</th>
+                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.category.th}`}>Category</th>
+                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.marketplace.th}`}>Marketplace</th>
                   {userRole !== 'warehouse' && (
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap min-w-[150px]">PIC</th>
+                    <th className={`${DASHBOARD_TH} ${dashboardCoreCols.pic.th}`}>PIC</th>
                   )}
-                  {tableExtraFields.map(f => <th key={f.key} className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide whitespace-nowrap">{f.label}</th>)}
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide">Status</th>
+                  {tableExtraFields.map(f => (
+                    <th key={f.key} className={extraFieldHeaderClass(f.tableClass)}>{f.label}</th>
+                  ))}
+                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.status.th}`}>Status</th>
                   {canDeleteCases && (
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-zinc-600 uppercase tracking-wide w-[88px]">Actions</th>
+                    <th className={`${DASHBOARD_TH} text-right ${dashboardCoreCols.actions.th}`}>Actions</th>
                   )}
                 </tr>
               </thead>
@@ -656,12 +686,21 @@ export default function DashboardClient({
 
                       <td className="sticky left-[360px] z-20 bg-white group-hover:bg-blue-50/80 transition-colors px-4 py-3 w-[140px] min-w-[140px] align-top border-r border-zinc-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.06)]"><span className="font-mono text-xs font-semibold bg-zinc-100 text-zinc-800 px-2 py-1 rounded-md border border-zinc-200">#{inc.order_number}</span></td>
                       
-                      <td className="px-4 py-3 text-sm text-zinc-700 whitespace-nowrap align-top">{formatDateOnly(inc.complaint_date)}</td>
-                      <td className="px-4 py-3 align-top"><span className={`px-2.5 py-1 rounded-full text-xs font-semibold ring-1 ring-inset ${categoryRingStyle(categories.find(c => c.name === inc.category)?.color)}`}>{inc.category}</span></td>
-                      <td className="px-4 py-3 text-sm font-medium text-zinc-800 whitespace-nowrap align-top">{inc.marketplace}</td>
+                      <td className={dashboardCoreCols.date.td}>{formatDateOnly(inc.complaint_date)}</td>
+                      <td className={dashboardCoreCols.category.td}>
+                        <span
+                          title={inc.category}
+                          className={`inline-flex max-w-full items-center px-2.5 py-1 rounded-full text-xs font-semibold ring-1 ring-inset whitespace-nowrap ${categoryRingStyle(categories.find(c => c.name === inc.category)?.color)}`}
+                        >
+                          <span className="truncate">{inc.category}</span>
+                        </span>
+                      </td>
+                      <td className={dashboardCoreCols.marketplace.td}>
+                        <span className="block truncate" title={inc.marketplace}>{inc.marketplace}</span>
+                      </td>
 
                       {userRole !== 'warehouse' && (
-                        <td className="px-2 py-2 align-top min-w-[150px]" onClick={(e) => e.stopPropagation()}>
+                        <td className={dashboardCoreCols.pic.td} onClick={(e) => e.stopPropagation()}>
                           <select
                             value={inc.assigned_to || ''}
                             onChange={(e) => {
@@ -685,20 +724,23 @@ export default function DashboardClient({
                       {tableExtraFields.map(field => {
                         const value = inc[field.key as keyof IncidentExtraDbFields]
                         return (
-                          <td key={field.key} className={`px-2 py-2 align-top ${field.tableClass ?? 'min-w-[120px]'}`}>
+                          <td key={field.key} className={extraFieldCellClass(field.tableClass)}>
                             <EditableCell field={field} value={value} onSave={(newVal) => updateIncidentField(inc.id, field.key, newVal)} />
                           </td>
                         )
                       })}
 
-                      <td className="px-4 py-3 whitespace-nowrap align-top" onClick={(e) => e.stopPropagation()}>
-                        <div className="relative inline-block">
-                          <div className={`flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold border ${sm.select}`}><span className={`w-2 h-2 rounded-full shrink-0 ${sm.dot}`} />{inc.status}</div>
+                      <td className={dashboardCoreCols.status.td} onClick={(e) => e.stopPropagation()}>
+                        <div className="relative inline-flex max-w-full">
+                          <div className={`flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${sm.select}`}>
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${sm.dot}`} />
+                            <span className="truncate">{inc.status}</span>
+                          </div>
                           <select value={inc.status} onChange={(e) => { e.stopPropagation(); updateStatus(inc.id, e.target.value) }} onClick={(e)=>e.stopPropagation()} className="absolute inset-0 opacity-0 w-full cursor-pointer">{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
                         </div>
                       </td>
                       {canDeleteCases && (
-                        <td className="px-4 py-3 text-right align-top" onClick={(e) => e.stopPropagation()}>
+                        <td className={dashboardCoreCols.actions.td} onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             onClick={(e) => void handleDeleteIncident(e, inc)}

@@ -16,6 +16,13 @@ export const incidentExtraFields = [
     tableClass: 'min-w-[260px]',
   },
   {
+    key: 'province',
+    label: 'Province',
+    type: 'text',
+    placeholder: 'e.g. Banten, DKI Jakarta',
+    tableClass: 'min-w-[140px] whitespace-nowrap',
+  },
+  {
     key: 'appeal_status',
     label: 'Appeal',
     type: 'select',

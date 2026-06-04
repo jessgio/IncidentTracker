@@ -16,6 +16,7 @@ import {
 import { deleteIncident } from '../../../lib/delete-incident'
 import { storagePathFromPublicUrl, type AttachmentItem } from '../../../lib/attachment-utils'
 import { AttachmentGallery } from '../../../components/AttachmentGallery'
+import { WarehouseNotifyModal } from '../../../components/WarehouseNotifyModal'
 
 type Attachment = AttachmentItem
 type Comment = { id: string; comment_text: string; created_at: string; user_id: string; profiles: { full_name: string; email: string } }
@@ -26,7 +27,7 @@ type Incident = {
   profiles: { full_name: string; email: string } | null
 } & IncidentExtraDbFields
 
-type Profile = { id: string; full_name: string; email: string }
+type Profile = { id: string; full_name: string; email: string; role?: string }
 
 const WAREHOUSE_STATUS_OPTIONS = incidentExtraFields.find(f => f.key === 'warehouse_status')?.options ?? []
 
@@ -48,6 +49,7 @@ export default function CommentThread({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [isDeletingCase, setIsDeletingCase] = useState(false)
+  const [showWarehouseNotify, setShowWarehouseNotify] = useState(false)
 
   const [isEditing, setIsEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -69,7 +71,7 @@ export default function CommentThread({
     const [incRes, commentRes, agentRes, catRes, mpRes, attRes] = await Promise.all([
       supabase.from('incidents').select('*, profiles(full_name, email)').eq('id', incidentId).single(),
       supabase.from('comments').select('*, profiles(full_name, email)').eq('incident_id', incidentId).order('created_at', { ascending: true }),
-      supabase.from('profiles').select('id, full_name, email'),
+      supabase.from('profiles').select('id, full_name, email, role'),
       supabase.from('categories').select('name, color').order('name'),
       supabase.from('marketplaces').select('id, name').order('name'),
       supabase.from('attachments').select('id, file_name, file_type, file_url, created_at').eq('incident_id', incidentId).order('created_at', { ascending: true }),
@@ -188,6 +190,23 @@ export default function CommentThread({
 
   const requestWarehouse = () => handleStatusChange(WAITING_ON_WAREHOUSE)
 
+  const warehouseMembers = agents.filter(a => a.role === 'warehouse')
+  const canNotifyWarehouse = userRole === 'cs' || userRole === 'manager'
+
+  const sendWarehouseNotify = async (recipientIds: string[], message: string) => {
+    const res = await fetch(`/api/incidents/${incidentId}/notify-warehouse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipientIds, message }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      return { ok: false, error: (data as { error?: string }).error ?? 'Could not send email.' }
+    }
+    await fetchAll()
+    return { ok: true }
+  }
+
   const handleAssigneeChange = async (newAssigneeId: string) => {
     const aAgent = agents.find(a => a.id === newAssigneeId) || null
     if (incident) setIncident({ ...incident, assigned_to: newAssigneeId || null, profiles: aAgent ? { full_name: aAgent.full_name, email: aAgent.email } : null })
@@ -228,6 +247,20 @@ export default function CommentThread({
 
   return (
     <div className="app-page">
+      {showWarehouseNotify && (
+        <WarehouseNotifyModal
+          orderNumber={incident.order_number}
+          members={warehouseMembers}
+          onClose={() => setShowWarehouseNotify(false)}
+          onSend={async (recipientIds, message) => {
+            const result = await sendWarehouseNotify(recipientIds, message)
+            if (result.ok) {
+              window.alert(`Email sent to ${recipientIds.length} warehouse team member${recipientIds.length === 1 ? '' : 's'}.`)
+            }
+            return result
+          }}
+        />
+      )}
       <div className="app-container max-w-5xl">
         <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-600 hover:text-blue-700 transition mb-6">
           ← Back to dashboard
@@ -261,8 +294,34 @@ export default function CommentThread({
                     <h3 className="text-sm font-semibold text-zinc-800 mb-4">Additional details</h3>
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-y-5 gap-x-5">
                       {incidentExtraFields.map(field => {
+                        if (field.key === 'province') return null
+                        if (field.key === 'customer_address') {
+                          const addressVal = incident.customer_address
+                          const provinceVal = incident.province
+                          if (!addressVal && !provinceVal) return null
+                          return (
+                            <div key="address-block" className="col-span-2 md:col-span-3">
+                              {addressVal ? (
+                                <>
+                                  <p className="app-label mb-1">Address</p>
+                                  <p className="text-sm text-zinc-900 whitespace-pre-wrap leading-relaxed bg-zinc-50 border border-zinc-200 px-3 py-2 rounded-lg">
+                                    {formatExtraValue(addressVal, 'textarea')}
+                                  </p>
+                                </>
+                              ) : null}
+                              {provinceVal ? (
+                                <>
+                                  <p className={`app-label mb-1 ${addressVal ? 'mt-3' : ''}`}>Province</p>
+                                  <p className="text-sm text-zinc-900 bg-zinc-50 border border-zinc-200 px-3 py-2 rounded-lg">
+                                    {provinceVal}
+                                  </p>
+                                </>
+                              ) : null}
+                            </div>
+                          )
+                        }
                         const val = incident[field.key as keyof IncidentExtraDbFields]
-                        if (val === null || val === undefined || val === '') return null;
+                        if (val === null || val === undefined || val === '') return null
                         return (
                           <div key={field.key} className={field.type === 'textarea' ? 'col-span-2 md:col-span-3' : ''}>
                             <p className="app-label mb-1">{field.label}</p>
@@ -289,20 +348,44 @@ export default function CommentThread({
                   <div className="border-t border-zinc-100 pt-4 mt-2">
                     <h3 className="text-sm font-semibold text-zinc-800 mb-3">Additional details</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {incidentExtraFields.map(field => (
-                        <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2' : ''}>
-                          <label className="app-label">{field.label}</label>
-                          {field.type === 'textarea' ? (
-                            <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="app-input resize-y" placeholder={(field as any).placeholder} />
-                          ) : field.type === 'select' ? (
-                            <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="app-select w-full">
-                              {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
-                            </select>
-                          ) : (
-                            <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="app-input" />
-                          )}
-                        </div>
-                      ))}
+                      {incidentExtraFields.map(field => {
+                        if (field.key === 'province') return null
+                        if (field.key === 'customer_address') {
+                          return (
+                            <div key="address-block" className="md:col-span-2">
+                              <label className="app-label">Address</label>
+                              <textarea
+                                value={editExtraForm.customer_address}
+                                onChange={(e) => setEditExtraForm(p => ({ ...p, customer_address: e.target.value }))}
+                                rows={3}
+                                className="app-input resize-y"
+                                placeholder="Customer address"
+                              />
+                              <label className="app-label mt-3">Province</label>
+                              <input
+                                value={editExtraForm.province}
+                                onChange={(e) => setEditExtraForm(p => ({ ...p, province: e.target.value }))}
+                                placeholder="e.g. Banten, DKI Jakarta"
+                                className="app-input"
+                              />
+                            </div>
+                          )
+                        }
+                        return (
+                          <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2' : ''}>
+                            <label className="app-label">{field.label}</label>
+                            {field.type === 'textarea' ? (
+                              <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="app-input resize-y" placeholder={(field as any).placeholder} />
+                            ) : field.type === 'select' ? (
+                              <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="app-select w-full">
+                                {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                              </select>
+                            ) : (
+                              <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="app-input" />
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                   <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100">
@@ -334,6 +417,15 @@ export default function CommentThread({
                     className="w-full text-xs font-semibold bg-orange-100 hover:bg-orange-200 text-orange-900 border border-orange-300 px-4 py-2.5 rounded-lg transition"
                   >
                     Hand off to Warehouse
+                  </button>
+                )}
+                {canNotifyWarehouse && (
+                  <button
+                    type="button"
+                    onClick={() => setShowWarehouseNotify(true)}
+                    className="w-full text-xs font-semibold bg-white hover:bg-orange-50 text-orange-900 border border-orange-300 px-4 py-2.5 rounded-lg transition"
+                  >
+                    Email warehouse team
                   </button>
                 )}
                 {userRole !== 'warehouse' && (

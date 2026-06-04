@@ -339,6 +339,7 @@ export default function DashboardClient({
   }
 
   const hasActiveFilters = !!(filterFrom || filterTo || filterCategory || filterMarketplace || filterStatus || filterQueue || filterSearch)
+  const isSearchActive = filterSearch.trim().length > 0
   const handlePageChange = (page: number) => { setCurrentPage(page); currentPageRef.current = page; fetchPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -671,9 +672,14 @@ export default function DashboardClient({
           </div>
         </div>
 
-        <DashboardMetrics stats={stats} categoryColors={categoryColorByName} />
+        <DashboardMetrics
+          stats={stats}
+          categoryColors={categoryColorByName}
+          compact={isSearchActive}
+        />
 
-        <div className="mb-6">
+        <div className="flex flex-col">
+        <div className={isSearchActive ? 'order-2 mt-6 mb-0' : 'order-1 mb-6'}>
           {!showForm ? (
             <button onClick={() => setShowForm(true)} className="app-card w-full border-dashed border-blue-300 px-6 py-4 flex items-center justify-center gap-2 font-semibold text-blue-700 hover:bg-blue-50/50 transition">
               <span className="text-lg" aria-hidden>+</span> Log new incident
@@ -760,6 +766,12 @@ export default function DashboardClient({
           )}
         </div>
 
+        <div className={isSearchActive ? 'order-1' : 'order-2'}>
+        {isSearchActive && (
+          <p className="text-sm font-semibold text-zinc-800 mb-2 px-1">
+            Search results for &ldquo;{filterSearch.trim()}&rdquo;
+          </p>
+        )}
         <p className="text-xs text-zinc-600 mb-2 px-1">
           Click cells to edit inline. Open a row for details, comments, and attachments.
         </p>
@@ -935,6 +947,8 @@ export default function DashboardClient({
               </div>
             </div>
           )}
+        </div>
+        </div>
         </div>
 
         {showManageLists && <ManageListsModal onClose={() => setShowManageLists(false)} />}

@@ -20,6 +20,8 @@ import {
 type Props = {
   stats: DashboardStats
   categoryColors: Record<string, string>
+  /** When true (active search), only total case count and per-status totals are shown. */
+  compact?: boolean
 }
 
 function StatCard({
@@ -133,7 +135,7 @@ function StatusBreakdownList({
   )
 }
 
-function OpenStatCard({ stats }: { stats: DashboardStats }) {
+function OpenStatCard({ stats, compact = false }: { stats: DashboardStats; compact?: boolean }) {
   const openRows = openStatusBreakdown(stats.by_status).filter(r => r.count > 0)
   const closedRows = closedStatusBreakdown(stats.by_status)
   const totalOpen = stats.total_open
@@ -142,26 +144,32 @@ function OpenStatCard({ stats }: { stats: DashboardStats }) {
 
   return (
     <div className="p-4 rounded-xl border shadow-sm bg-white border-zinc-200">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 shrink-0">
+      <div className={`flex flex-col gap-4 ${compact ? '' : 'sm:flex-row sm:items-start sm:justify-between'}`}>
+        <div className={compact ? 'shrink-0' : 'flex flex-wrap items-baseline gap-x-6 gap-y-2 shrink-0'}>
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Cases in filter</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+              {compact ? 'Matching cases' : 'Cases in filter'}
+            </p>
             <p className="text-3xl font-semibold tabular-nums text-zinc-900 mt-0.5">{totalAll}</p>
           </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Open</p>
-            <p className="text-3xl font-semibold tabular-nums text-zinc-900 mt-0.5">{totalOpen}</p>
-            <p className="text-xs font-medium text-zinc-500">ongoing</p>
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Resolved / closed</p>
-            <p className={`text-3xl font-semibold tabular-nums mt-0.5 ${totalClosed > 0 ? 'text-emerald-800' : 'text-zinc-400'}`}>
-              {totalClosed}
-            </p>
-          </div>
+          {!compact && (
+            <>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Open</p>
+                <p className="text-3xl font-semibold tabular-nums text-zinc-900 mt-0.5">{totalOpen}</p>
+                <p className="text-xs font-medium text-zinc-500">ongoing</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Resolved / closed</p>
+                <p className={`text-3xl font-semibold tabular-nums mt-0.5 ${totalClosed > 0 ? 'text-emerald-800' : 'text-zinc-400'}`}>
+                  {totalClosed}
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0 border-t sm:border-t-0 sm:border-l border-zinc-100 pt-4 sm:pt-0 sm:pl-4">
+        <div className={`flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0 ${compact ? '' : 'border-t sm:border-t-0 sm:border-l border-zinc-100 pt-4 sm:pt-0 sm:pl-4'}`}>
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 mb-2">By open status</p>
             <StatusBreakdownList
@@ -257,8 +265,16 @@ function PicWorkloadCard({ rows, totalOpen }: { rows: PicWorkload[]; totalOpen: 
   )
 }
 
-export default function DashboardMetrics({ stats, categoryColors }: Props) {
+export default function DashboardMetrics({ stats, categoryColors, compact = false }: Props) {
   const flowNet = stats.trend.this_week_resolved - stats.trend.this_week
+
+  if (compact) {
+    return (
+      <div className="mb-3">
+        <OpenStatCard stats={stats} compact />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 mb-8">

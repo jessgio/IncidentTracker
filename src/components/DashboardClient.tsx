@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
 import { createClient } from '../utils/supabase/client'
 import { ManageListsModal } from './ManageListsModal'
 import DashboardMetrics from './DashboardMetrics'
@@ -18,6 +19,12 @@ import {
 import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
 import { applyIncidentListFilters } from '../lib/incident-list-filters'
+import {
+  applyIncidentSort,
+  nextSortDirection,
+  type DashboardSortColumn,
+  type SortDirection,
+} from '../lib/dashboard-table-sort'
 import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
 import {
   buildImportTemplateXlsx,
@@ -76,6 +83,45 @@ function extraFieldHeaderClass(tableClass?: string) {
 
 function extraFieldCellClass(tableClass?: string) {
   return `px-4 py-3 align-top ${tableClass ?? 'min-w-[120px]'}`
+}
+
+function SortableTh({
+  label,
+  column,
+  sortColumn,
+  sortDirection,
+  onSort,
+  className = DASHBOARD_TH,
+}: {
+  label: string
+  column: DashboardSortColumn
+  sortColumn: DashboardSortColumn
+  sortDirection: SortDirection
+  onSort: (column: DashboardSortColumn) => void
+  className?: string
+}) {
+  const active = sortColumn === column
+  const SortIcon = active
+    ? (sortDirection === 'asc' ? ChevronUp : ChevronDown)
+    : ChevronsUpDown
+
+  return (
+    <th className={className} scope="col" aria-sort={active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`inline-flex items-center gap-1 w-full text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap transition-colors ${
+          active ? 'text-blue-700' : 'text-zinc-600 hover:text-zinc-900'
+        }`}
+      >
+        <span>{label}</span>
+        <SortIcon
+          className={`w-3.5 h-3.5 shrink-0 ${active ? 'text-blue-600' : 'text-zinc-400'}`}
+          aria-hidden
+        />
+      </button>
+    </th>
+  )
 }
 
 // Helper for cross-origin downloads
@@ -174,6 +220,8 @@ export default function DashboardClient({
   )
   const [filterSearch, setFilterSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+  const [sortColumn, setSortColumn] = useState<DashboardSortColumn>('created_at')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
@@ -264,10 +312,15 @@ export default function DashboardClient({
     setTotalCount(count || 0)
     const start = (page - 1) * PAGE_SIZE
     const end = start + PAGE_SIZE - 1
-    const query = applyFilters(
-      supabase.from('incidents').select('*, profiles(full_name, email), attachments(id, file_name, file_type, file_url)').order('created_at', { ascending: false }).range(start, end),
-      f
+    const baseQuery = supabase
+      .from('incidents')
+      .select('*, profiles(full_name, email), attachments(id, file_name, file_type, file_url)')
+    const sortedQuery = applyIncidentSort(
+      baseQuery,
+      sortColumnRef.current,
+      sortDirectionRef.current
     )
+    const query = applyFilters(sortedQuery.range(start, end), f)
     const { data } = await query
     if (data) setIncidents(data)
   }, [supabase, applyFilters, currentFilters])
@@ -282,6 +335,8 @@ export default function DashboardClient({
   // Keep the latest callbacks/page in refs so the realtime subscription (set up once)
   // always reads current filters and page instead of values captured on first render.
   const currentPageRef = useRef(1)
+  const sortColumnRef = useRef<DashboardSortColumn>('created_at')
+  const sortDirectionRef = useRef<SortDirection>('desc')
   const fetchPageRef = useRef(fetchPage)
   const fetchStatsRef = useRef(fetchStats)
   const fetchDropdownsRef = useRef(fetchDropdowns)
@@ -343,10 +398,19 @@ export default function DashboardClient({
   const isSearchActive = filterSearch.trim().length > 0
   const handlePageChange = (page: number) => { setCurrentPage(page); currentPageRef.current = page; fetchPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
+  const handleSort = (column: DashboardSortColumn) => {
+    const nextDir = nextSortDirection(sortColumn, sortDirection, column)
+    setSortColumn(column)
+    setSortDirection(nextDir)
+    sortColumnRef.current = column
+    sortDirectionRef.current = nextDir
+    setCurrentPage(1)
+    currentPageRef.current = 1
+    fetchPage(1)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!title || !orderNumber || !complaintDate) return; setIsSubmitting(true);
-    // Capture values before the form resets so the background AI call uses the right context.
-    const submitted = { title, category, marketplace }
     const { data: inserted, error } = await supabase
       .from('incidents')
       .insert([{
@@ -759,26 +823,90 @@ export default function DashboardClient({
           </p>
         )}
         <p className="text-xs text-zinc-600 mb-2 px-1">
-          Click cells to edit inline. Open a row for details, comments, and attachments.
+          Click column headers to sort. Click cells to edit inline. Open a row for details, comments, and attachments.
         </p>
         <div className="app-card overflow-hidden relative">
           <div className="overflow-x-auto w-full">
             <table className="w-max min-w-full border-collapse relative" style={{ minWidth: DASHBOARD_TABLE_MIN_W }}>
               <thead className="bg-zinc-50 border-b border-zinc-200">
                 <tr>
-                  <th className={`sticky left-0 z-30 bg-zinc-50 ${DASHBOARD_TH} w-[240px] min-w-[240px]`}>Incident</th>
+                  <SortableTh
+                    label="Incident"
+                    column="title"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`sticky left-0 z-30 bg-zinc-50 ${DASHBOARD_TH} w-[240px] min-w-[240px]`}
+                  />
                   <th className={`sticky left-[240px] z-30 bg-zinc-50 ${DASHBOARD_TH} w-[120px] min-w-[120px]`}>Media</th>
-                  <th className={`sticky left-[360px] z-30 bg-zinc-50 ${DASHBOARD_TH} w-[140px] min-w-[140px] border-r border-zinc-200 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]`}>Order #</th>
-                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.date.th}`}>Date</th>
-                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.category.th}`}>Category</th>
-                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.marketplace.th}`}>Marketplace</th>
+                  <SortableTh
+                    label="Order #"
+                    column="order_number"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`sticky left-[360px] z-30 bg-zinc-50 ${DASHBOARD_TH} w-[140px] min-w-[140px] border-r border-zinc-200 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.08)]`}
+                  />
+                  <SortableTh
+                    label="Date"
+                    column="complaint_date"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`${DASHBOARD_TH} ${dashboardCoreCols.date.th}`}
+                  />
+                  <SortableTh
+                    label="Category"
+                    column="category"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`${DASHBOARD_TH} ${dashboardCoreCols.category.th}`}
+                  />
+                  <SortableTh
+                    label="Marketplace"
+                    column="marketplace"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`${DASHBOARD_TH} ${dashboardCoreCols.marketplace.th}`}
+                  />
                   {userRole !== 'warehouse' && (
-                    <th className={`${DASHBOARD_TH} ${dashboardCoreCols.pic.th}`}>PIC</th>
+                    <SortableTh
+                      label="PIC"
+                      column="assigned_to"
+                      sortColumn={sortColumn}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                      className={`${DASHBOARD_TH} ${dashboardCoreCols.pic.th}`}
+                    />
                   )}
-                  <th className={`${DASHBOARD_TH} ${dashboardCoreCols.status.th}`}>Status</th>
-                  <th className={extraFieldHeaderClass(actionTableField.tableClass)}>{actionTableField.label}</th>
+                  <SortableTh
+                    label="Status"
+                    column="status"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={`${DASHBOARD_TH} ${dashboardCoreCols.status.th}`}
+                  />
+                  <SortableTh
+                    label={actionTableField.label}
+                    column="action_taken"
+                    sortColumn={sortColumn}
+                    sortDirection={sortDirection}
+                    onSort={handleSort}
+                    className={extraFieldHeaderClass(actionTableField.tableClass)}
+                  />
                   {tableExtraFields.map(f => (
-                    <th key={f.key} className={extraFieldHeaderClass(f.tableClass)}>{f.label}</th>
+                    <SortableTh
+                      key={f.key}
+                      label={f.label}
+                      column={f.key as DashboardSortColumn}
+                      sortColumn={sortColumn}
+                      sortDirection={sortDirection}
+                      onSort={handleSort}
+                      className={extraFieldHeaderClass(f.tableClass)}
+                    />
                   ))}
                   {canDeleteCases && (
                     <th className={`${DASHBOARD_TH} text-right ${dashboardCoreCols.actions.th}`}>Actions</th>

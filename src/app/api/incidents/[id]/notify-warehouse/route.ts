@@ -6,6 +6,7 @@ import {
   warehouseNotifySubject,
   type WarehouseNotifyIncident,
 } from '../../../../../lib/warehouse-notify-email'
+import { appendNotifyShippingDetails } from '../../../../../lib/notify-shipping-details'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -87,9 +88,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       process.env.REPORT_FROM ||
       'Incident Tracker <reports@aerisbeaute.com>'
 
+    const emailMessage = appendNotifyShippingDetails(message, incident)
     const html = buildWarehouseNotifyEmailHtml({
       incident: incident as WarehouseNotifyIncident,
-      message,
+      message: emailMessage,
       senderName,
       caseUrl,
     })
@@ -114,7 +116,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     await supabase.from('comments').insert([{
       incident_id: incidentId,
       user_id: user.id,
-      comment_text: `Warehouse notified by email (${names}).\n\nMessage:\n${message}`,
+      comment_text: `Warehouse notified by email (${names}).\n\nMessage:\n${emailMessage}`,
     }])
 
     return NextResponse.json({

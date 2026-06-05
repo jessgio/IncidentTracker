@@ -19,6 +19,10 @@ function defaultSelected(members: CsMember[], assignedPicId: string | null) {
 export function CsNotifyModal({
   orderNumber,
   warehouseStatus,
+  bpbNumber,
+  customerAddress,
+  courier,
+  shippingLabel,
   members,
   assignedPicId,
   onClose,
@@ -26,6 +30,10 @@ export function CsNotifyModal({
 }: {
   orderNumber: string
   warehouseStatus: string | null | undefined
+  bpbNumber?: string | null
+  customerAddress?: string | null
+  courier?: string | null
+  shippingLabel?: string | null
   members: CsMember[]
   assignedPicId: string | null
   onClose: () => void
@@ -37,8 +45,15 @@ export function CsNotifyModal({
 }) {
   const [templateId, setTemplateId] = useState<CsNotifyTemplateId>('request_completed')
   const templateCtx = useMemo(
-    () => ({ warehouseStatus, orderNumber }),
-    [warehouseStatus, orderNumber]
+    () => ({
+      warehouseStatus,
+      orderNumber,
+      bpb_number: bpbNumber,
+      customer_address: customerAddress,
+      courier,
+      shipping_label: shippingLabel,
+    }),
+    [warehouseStatus, orderNumber, bpbNumber, customerAddress, courier, shippingLabel]
   )
   const [message, setMessage] = useState(() =>
     getCsNotifyTemplate('request_completed').buildMessage(templateCtx)
@@ -168,7 +183,7 @@ export function CsNotifyModal({
               disabled={members.length === 0}
             />
             <p className="text-xs text-zinc-500 mt-1.5">
-              Case details are included automatically in the email.
+              BPB #, address, courier, and shipping label are added to your message when filled in on the case.
             </p>
           </div>
 

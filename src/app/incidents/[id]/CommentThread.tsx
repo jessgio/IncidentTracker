@@ -294,6 +294,10 @@ export default function CommentThread({
         <CsNotifyModal
           orderNumber={incident.order_number}
           warehouseStatus={incident.warehouse_status}
+          bpbNumber={incident.bpb_number}
+          customerAddress={incident.customer_address}
+          courier={incident.courier}
+          shippingLabel={incident.shipping_label}
           members={csMembers}
           assignedPicId={incident.assigned_to}
           onClose={() => setShowCsNotify(false)}

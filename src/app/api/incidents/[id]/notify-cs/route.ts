@@ -7,6 +7,7 @@ import {
   type CsNotifyIncident,
 } from '../../../../../lib/cs-notify-email'
 import { getCsNotifyTemplate, type CsNotifyTemplateId } from '../../../../../lib/cs-notify-templates'
+import { appendNotifyShippingDetails } from '../../../../../lib/notify-shipping-details'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -100,9 +101,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       'Incident Tracker <reports@aerisbeaute.com>'
 
     const template = getCsNotifyTemplate(templateId)
+    const emailMessage = appendNotifyShippingDetails(message, incident)
     const html = buildCsNotifyEmailHtml({
       incident: incident as CsNotifyIncident,
-      message,
+      message: emailMessage,
       senderName,
       caseUrl,
       templateLabel: templateId !== 'custom' ? template.label : undefined,
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     await supabase.from('comments').insert([{
       incident_id: incidentId,
       user_id: user.id,
-      comment_text: `CS notified by email (${names})${templateNote}.\n\nMessage:\n${message}`,
+      comment_text: `CS notified by email (${names})${templateNote}.\n\nMessage:\n${emailMessage}`,
     }])
 
     return NextResponse.json({

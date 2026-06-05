@@ -112,7 +112,7 @@ export function WarehouseNotifyModal({
               disabled={members.length === 0}
             />
             <p className="text-xs text-zinc-500 mt-1.5">
-              Case details are included automatically in the email.
+              BPB #, address, courier, and shipping label are added to your message when filled in on the case.
             </p>
           </div>
 

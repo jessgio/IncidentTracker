@@ -31,7 +31,7 @@ type Attachment = { id: string; file_name: string; file_type: string; file_url: 
 
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
-  order_number: string; complaint_date: string; created_at: string; ai_suggestion: string | null;
+  order_number: string; complaint_date: string; created_at: string;
   assigned_to: string | null;
   profiles?: { full_name: string | null; email: string } | null;
   attachments?: Attachment[]
@@ -362,20 +362,6 @@ export default function DashboardClient({
     if (error) { alert('Could not save the incident. Please try again.'); return }
 
     setTitle(''); setOrderNumber(''); setAssignedTo(userId); setExtraForm({ ...emptyExtraFormState }); setShowExtraFields(false); setShowForm(false)
-
-    // Generate the draft response in the background; the realtime subscription picks up
-    // the update once it lands, so saving never blocks on the AI call.
-    if (inserted?.id) {
-      const incidentId = inserted.id
-      fetch('/api/suggest', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(submitted) })
-        .then(res => res.ok ? res.json() : null)
-        .then(data => {
-          if (data?.suggestion) {
-            return supabase.from('incidents').update({ ai_suggestion: data.suggestion }).eq('id', incidentId)
-          }
-        })
-        .catch(() => {})
-    }
   }
 
   const handleAddMarketplace = async (name: string) => { const { error } = await supabase.from('marketplaces').insert([{ name }]); if (!error) { setMarketplace(name); setIsAddingMp(false) } else alert('Marketplace already exists.') }
@@ -558,7 +544,6 @@ export default function DashboardClient({
         csvEscape(row.assigned_to ? picEmailById[row.assigned_to] ?? '' : ''),
         ...incidentExtraFields.map(f => csvEscape(row[f.key as keyof IncidentExtraDbFields])),
         csvEscape(row.status),
-        csvEscape(row.ai_suggestion),
         csvEscape(row.created_at),
       ].join(','))]
       downloadCsvBlob(csvRows.join('\n'), `incidents-export-${new Date().toISOString().split('T')[0]}.csv`)

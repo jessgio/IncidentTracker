@@ -59,7 +59,6 @@ export function getImportTemplateHeaders() {
 export function getExportHeaders() {
   return [
     ...INCIDENT_IMPORT_COLUMNS.map(c => c.label),
-    'Draft Response',
     'Created At',
   ]
 }

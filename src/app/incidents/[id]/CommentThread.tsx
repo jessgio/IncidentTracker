@@ -27,7 +27,7 @@ type Comment = { id: string; comment_text: string; created_at: string; user_id: 
 type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
   order_number: string; complaint_date: string; created_at: string; assigned_to: string | null;
-  ai_suggestion: string | null; resolved_at?: string | null; warehouse_requested_at?: string | null;
+  resolved_at?: string | null; warehouse_requested_at?: string | null;
   profiles: { full_name: string; email: string } | null
 } & IncidentExtraDbFields
 
@@ -548,14 +548,6 @@ export default function CommentThread({
                 )}
               </div>
             </div>
-          </div>
-        )}
-
-        {/* AI DRAFT RESPONSE */}
-        {incident.ai_suggestion && (
-          <div className="mb-6 app-card bg-violet-50 border-violet-200 p-5">
-            <p className="text-sm font-semibold text-violet-900 mb-2">AI draft response</p>
-            <p className="text-sm text-violet-950 leading-relaxed bg-white p-4 rounded-lg border border-violet-100">{incident.ai_suggestion}</p>
           </div>
         )}
 

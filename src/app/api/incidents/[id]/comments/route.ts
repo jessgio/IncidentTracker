@@ -6,6 +6,9 @@ import {
   buildCommentMentionEmailHtml,
   commentMentionSubject,
 } from '../../../../../lib/comment-mention-email'
+import { getAppOrigin } from '../../../../../lib/app-origin'
+import { isLarkConfigured, sendLarkText } from '../../../../../lib/lark'
+import { buildCommentLarkText, commentToLarkPlain } from '../../../../../lib/lark-messages'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const { data: incident, error: incError } = await supabase
       .from('incidents')
-      .select('id, title, order_number')
+      .select('id, title, order_number, status')
       .eq('id', incidentId)
       .single()
 
@@ -117,11 +120,31 @@ export async function POST(req: NextRequest, context: RouteContext) {
       emailFailures.push('(email not configured)')
     }
 
+    let larkError: string | undefined
+    if (isLarkConfigured('chat')) {
+      const caseUrl = `${getAppOrigin(req.nextUrl.origin)}/incidents/${incidentId}`
+      const authorName = senderProfile?.full_name || senderProfile?.email || 'A team member'
+      const larkText = buildCommentLarkText({
+        orderNumber: incident.order_number || 'N/A',
+        caseTitle: incident.title,
+        status: incident.status || 'Unknown',
+        authorName,
+        commentPlain: commentToLarkPlain(commentText),
+        caseUrl,
+      })
+      const larkResult = await sendLarkText(larkText, { webhookKind: 'chat' })
+      if (!larkResult.ok) {
+        console.error('Lark comment notify failed:', larkResult.error)
+        larkError = larkResult.error
+      }
+    }
+
     return NextResponse.json({
       success: true,
       commentId: comment.id,
       mentionsNotified,
       emailFailures: emailFailures.length > 0 ? emailFailures : undefined,
+      larkError,
     })
   } catch (err) {
     console.error('comments POST error:', err)

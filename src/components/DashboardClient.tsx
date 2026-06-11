@@ -512,12 +512,27 @@ export default function DashboardClient({
 
   const updateStatus = async (id: string, newStatus: string) => {
     const inc = incidents.find(i => i.id === id)
+    if (!inc || inc.status === newStatus) return
     const patch = statusChangePatch(newStatus, {
       resolved_at: (inc as Incident & { resolved_at?: string | null })?.resolved_at,
       warehouse_status: inc?.warehouse_status,
     })
     setIncidents(prev => prev.map(i => i.id === id ? { ...i, ...patch } as Incident : i))
-    await supabase.from('incidents').update(patch).eq('id', id)
+    const res = await fetch(`/api/incidents/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      alert((data as { error?: string }).error ?? 'Could not update status.')
+      fetchPage(currentPageRef.current)
+      return
+    }
+    if ((data as { larkError?: string }).larkError) {
+      console.warn('Lark alert failed:', (data as { larkError: string }).larkError)
+    }
+    fetchStats()
   }
 
   const handleDeleteIncident = async (

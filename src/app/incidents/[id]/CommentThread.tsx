@@ -176,39 +176,60 @@ export default function CommentThread({
   }
 
   const handleStatusChange = async (newStatus: string) => {
-    if (!incident) return
+    if (!incident || incident.status === newStatus) return
     const patch = statusChangePatch(newStatus, {
       resolved_at: incident.resolved_at,
       warehouse_status: incident.warehouse_status,
     })
     setIncident({ ...incident, ...patch } as Incident)
-    await supabase.from('incidents').update(patch).eq('id', incidentId)
+    const res = await fetch(`/api/incidents/${incidentId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      window.alert((data as { error?: string }).error ?? 'Could not update status.')
+      await fetchAll()
+      return
+    }
+    if ((data as { larkError?: string }).larkError) {
+      console.warn('Lark alert failed:', (data as { larkError: string }).larkError)
+    }
+    await fetchAll()
   }
 
   const handleWarehouseStatusChange = async (newWs: string) => {
-    if (!incident) return
-    const patch: Record<string, string | null> = {
+    if (!incident || (incident.warehouse_status || '') === newWs) return
+    const optimisticPatch: Record<string, string | null> = {
       warehouse_status: newWs || null,
       updated_at: new Date().toISOString(),
     }
     if (newWs === 'Completed') {
-      patch.warehouse_completed_at = new Date().toISOString()
+      optimisticPatch.warehouse_completed_at = new Date().toISOString()
+      if (incident.status === WAITING_ON_WAREHOUSE) {
+        Object.assign(optimisticPatch, statusChangePatch('Investigating', {
+          resolved_at: incident.resolved_at,
+          warehouse_status: newWs,
+        }))
+      }
     }
-    if (newWs === 'Completed' && incident.status === WAITING_ON_WAREHOUSE) {
-      Object.assign(patch, statusChangePatch('Investigating', {
-        resolved_at: incident.resolved_at,
-        warehouse_status: newWs,
-      }))
+    setIncident({ ...incident, ...optimisticPatch } as Incident)
+    const res = await fetch(`/api/incidents/${incidentId}/warehouse-status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ warehouseStatus: newWs }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      window.alert((data as { error?: string }).error ?? 'Could not update warehouse status.')
+      await fetchAll()
+      return
     }
-    setIncident({ ...incident, ...patch } as Incident)
-    await supabase.from('incidents').update(patch).eq('id', incidentId)
-    if (newWs === 'Completed') {
-      await supabase.from('comments').insert([{
-        incident_id: incidentId,
-        user_id: currentUserId,
-        comment_text: 'Warehouse marked fulfillment as Completed — case returned to CS for customer follow-up.',
-      }])
+    if ((data as { larkError?: string }).larkError) {
+      console.warn('Lark alert failed:', (data as { larkError: string }).larkError)
     }
+    await fetchAll()
   }
 
   const requestWarehouse = () => handleStatusChange(WAITING_ON_WAREHOUSE)

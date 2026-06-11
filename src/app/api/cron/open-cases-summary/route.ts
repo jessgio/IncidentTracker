@@ -133,7 +133,7 @@ export async function GET(req: Request) {
 
     if (process.env.OPENROUTER_API_KEY) {
       const aiRes = await ai.chat.completions.create({
-        model: 'google/gemini-2.0-flash-001',
+        model: 'google/gemini-flash-latest',
         messages: [
           {
             role: 'system',

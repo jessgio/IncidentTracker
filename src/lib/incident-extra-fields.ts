@@ -129,6 +129,12 @@ export const incidentExtraFields = [
 }[]
 
 export type ExtraFieldKey = typeof incidentExtraFields[number]['key']
+
+const faultPartyField = incidentExtraFields.find(f => f.key === 'fault_party')
+export const FAULT_PARTY_VALUES = (faultPartyField?.options ?? []).filter(o => o !== '') as Exclude<
+  NonNullable<typeof faultPartyField>['options'][number],
+  ''
+>[]
 export type MoneyFieldKey = Extract<
   ExtraFieldKey,
   'shipping_fee' | 'replacement_fee' | 'refund_amount'

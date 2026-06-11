@@ -8,6 +8,7 @@ import { ManageListsModal } from './ManageListsModal'
 import DashboardMetrics from './DashboardMetrics'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, formatExtraValue, formatDateOnly, csvEscape,
+  FAULT_PARTY_VALUES,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../lib/incident-extra-fields'
 import {
@@ -18,7 +19,8 @@ import {
 } from '../lib/incident-status'
 import { deleteIncident } from '../lib/delete-incident'
 import { EMPTY_STATS, fetchDashboardStats, type DashboardStats } from '../lib/dashboard-stats'
-import { applyIncidentListFilters } from '../lib/incident-list-filters'
+import { applyIncidentListFilters, type MetricFilter } from '../lib/incident-list-filters'
+import { resolveMetricClick, type DashboardMetricClick } from '../lib/dashboard-metric-clicks'
 import {
   applyIncidentSort,
   nextSortDirection,
@@ -214,11 +216,14 @@ export default function DashboardClient({
   const [filterTo, setFilterTo] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterMarketplace, setFilterMarketplace] = useState('')
+  const [filterFault, setFilterFault] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterQueue, setFilterQueue] = useState<QueuePreset>(
     userRole === 'warehouse' ? 'warehouse' : ''
   )
   const [filterSearch, setFilterSearch] = useState('')
+  const [filterMetric, setFilterMetric] = useState<MetricFilter | null>(null)
+  const [activeMetricKey, setActiveMetricKey] = useState<string | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [sortColumn, setSortColumn] = useState<DashboardSortColumn>('created_at')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
@@ -241,6 +246,7 @@ export default function DashboardClient({
   const [isImporting, setIsImporting] = useState(false)
   const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const incidentsTableRef = useRef<HTMLDivElement>(null)
 
   const supabase = createClient()
   const router = useRouter()
@@ -249,8 +255,8 @@ export default function DashboardClient({
   const updateExtraForm = (key: ExtraFieldKey, value: string) => setExtraForm(prev => ({ ...prev, [key]: value }))
 
   type Filters = {
-    from: string; to: string; cat: string; mp: string; stat: string
-    queue: QueuePreset; search: string
+    from: string; to: string; cat: string; mp: string; stat: string; fault: string
+    queue: QueuePreset; search: string; metric: MetricFilter | null
   }
 
   const applyFilters = useCallback(<T,>(query: T, f: Filters): T => {
@@ -260,27 +266,31 @@ export default function DashboardClient({
       cat: f.cat,
       mp: f.mp,
       stat: f.stat,
+      fault: f.fault,
       queue: f.queue,
       search: f.search,
       userId,
+      metric: f.metric,
     })
   }, [userId])
 
   const currentFilters = useCallback((
-    from?: string, to?: string, cat?: string, mp?: string, stat?: string,
-    queue?: QueuePreset, search?: string
+    from?: string, to?: string, cat?: string, mp?: string, stat?: string, fault?: string,
+    queue?: QueuePreset, search?: string, metric?: MetricFilter | null
   ): Filters => ({
     from: from ?? filterFrom,
     to: to ?? filterTo,
     cat: cat ?? filterCategory,
     mp: mp ?? filterMarketplace,
     stat: stat ?? filterStatus,
+    fault: fault ?? filterFault,
     queue: queue ?? filterQueue,
     search: search ?? filterSearch,
-  }), [filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterQueue, filterSearch])
+    metric: metric !== undefined ? metric : filterMetric,
+  }), [filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterFault, filterQueue, filterSearch, filterMetric])
 
   const fetchStats = useCallback(async (
-    from?: string, to?: string, cat?: string, mp?: string, stat?: string,
+    from?: string, to?: string, cat?: string, mp?: string, stat?: string, fault?: string,
     queue?: QueuePreset, search?: string
   ) => {
     try {
@@ -290,6 +300,7 @@ export default function DashboardClient({
         category: (cat ?? filterCategory) || undefined,
         marketplace: (mp ?? filterMarketplace) || undefined,
         status: (stat ?? filterStatus) || undefined,
+        fault: (fault ?? filterFault) || undefined,
         userId,
         queue: queue ?? filterQueue,
         search: search ?? filterSearch,
@@ -300,13 +311,13 @@ export default function DashboardClient({
       // RPC not deployed yet — leave stats empty rather than downloading all rows.
       setStats(EMPTY_STATS)
     }
-  }, [supabase, userId, filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterQueue, filterSearch])
+  }, [supabase, userId, filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterFault, filterQueue, filterSearch])
 
   const fetchPage = useCallback(async (
-    page: number, from?: string, to?: string, cat?: string, mp?: string, stat?: string,
-    queue?: QueuePreset, search?: string
+    page: number, from?: string, to?: string, cat?: string, mp?: string, stat?: string, fault?: string,
+    queue?: QueuePreset, search?: string, metric?: MetricFilter | null
   ) => {
-    const f = currentFilters(from, to, cat, mp, stat, queue, search)
+    const f = currentFilters(from, to, cat, mp, stat, fault, queue, search, metric)
     const { count } = await applyFilters(supabase.from('incidents').select('id', { count: 'exact', head: true }), f)
     setTotalPages(Math.max(1, Math.ceil((count || 0) / PAGE_SIZE)))
     setTotalCount(count || 0)
@@ -356,7 +367,7 @@ export default function DashboardClient({
 
   useEffect(() => {
     const initialQueue: QueuePreset = userRole === 'warehouse' ? 'warehouse' : ''
-    fetchPage(1, undefined, undefined, undefined, undefined, undefined, initialQueue)
+    fetchPage(1, undefined, undefined, undefined, undefined, undefined, undefined, initialQueue)
     fetchStats()
     fetchDropdowns()
     const channel = supabase.channel('realtime_dashboard')
@@ -370,31 +381,81 @@ export default function DashboardClient({
   }, [supabase])
 
   const applyFilter = (
-    from: string, to: string, cat: string, mp: string, stat: string,
-    queue: QueuePreset = filterQueue, search: string = filterSearch
+    from: string, to: string, cat: string, mp: string, stat: string, fault: string,
+    queue: QueuePreset = filterQueue, search: string = filterSearch,
+    metric: MetricFilter | null = filterMetric,
+    metricKey: string | null = activeMetricKey,
+    clearMetricHighlight = false
   ) => {
     setFilterFrom(from); setFilterTo(to); setFilterCategory(cat)
-    setFilterMarketplace(mp); setFilterStatus(stat); setFilterQueue(queue); setFilterSearch(search)
+    setFilterMarketplace(mp); setFilterFault(fault); setFilterStatus(stat)
+    setFilterQueue(queue); setFilterSearch(search)
+    setFilterMetric(metric)
+    if (clearMetricHighlight) {
+      setActiveMetricKey(null)
+    } else {
+      setActiveMetricKey(metricKey)
+    }
     setCurrentPage(1); currentPageRef.current = 1
-    fetchPage(1, from, to, cat, mp, stat, queue, search)
-    fetchStats(from, to, cat, mp, stat, queue, search)
+    fetchPage(1, from, to, cat, mp, stat, fault, queue, search, metric)
+    fetchStats(from, to, cat, mp, stat, fault, queue, search)
+  }
+
+  const handleMetricClick = (click: DashboardMetricClick) => {
+    const resolved = resolveMetricClick(click, activeMetricKey)
+    const toggledOff = resolved.activeKey === null && activeMetricKey !== null
+
+    let nextCat = filterCategory
+    let nextMp = filterMarketplace
+    let nextFault = filterFault
+    let nextStat = filterStatus
+    let nextQueue: QueuePreset = filterQueue
+
+    if (toggledOff) {
+      if (activeMetricKey?.startsWith('category:')) nextCat = ''
+      if (activeMetricKey?.startsWith('marketplace:')) nextMp = ''
+      if (activeMetricKey?.startsWith('fault:')) nextFault = ''
+      if (activeMetricKey?.startsWith('status:') || activeMetricKey?.startsWith('blocked:')) nextStat = ''
+      nextQueue = userRole === 'warehouse' ? 'warehouse' : ''
+      applyFilter(filterFrom, filterTo, nextCat, nextMp, nextStat, nextFault, nextQueue, filterSearch, null, null)
+      return
+    }
+
+    nextQueue = resolved.queue
+    if (resolved.status) nextStat = resolved.status
+    else if (resolved.metric || resolved.queue) nextStat = ''
+    if (resolved.category) nextCat = resolved.category
+    if (resolved.marketplace) nextMp = resolved.marketplace
+    if (resolved.fault) nextFault = resolved.fault
+
+    applyFilter(
+      filterFrom, filterTo, nextCat, nextMp, nextStat, nextFault, nextQueue, filterSearch,
+      resolved.metric, resolved.activeKey
+    )
+    requestAnimationFrame(() => {
+      incidentsTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
   }
 
   const setQueuePreset = (queue: QueuePreset) => {
-    applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, queue, filterSearch)
+    const metricKey = queue === 'mine' ? 'mine' : queue === 'warehouse' ? 'warehouse' : null
+    applyFilter(
+      filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterFault,
+      queue, filterSearch, null, metricKey, queue === ''
+    )
   }
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterQueue, searchInput)
+    applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, filterFault, filterQueue, searchInput, null, null, true)
   }
 
   const clearAllFilters = () => {
     setSearchInput('')
-    applyFilter('', '', '', '', '', '', '')
+    applyFilter('', '', '', '', '', '', userRole === 'warehouse' ? 'warehouse' : '', '', null, null, true)
   }
 
-  const hasActiveFilters = !!(filterFrom || filterTo || filterCategory || filterMarketplace || filterStatus || filterQueue || filterSearch)
+  const hasActiveFilters = !!(filterFrom || filterTo || filterCategory || filterMarketplace || filterFault || filterStatus || filterQueue || filterSearch || filterMetric)
   const isSearchActive = filterSearch.trim().length > 0
   const handlePageChange = (page: number) => { setCurrentPage(page); currentPageRef.current = page; fetchPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -704,15 +765,16 @@ export default function DashboardClient({
               <button type="submit" className="app-btn-primary">Search</button>
               <div className="flex items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2">
                 <span className="text-xs font-semibold text-zinc-600">From</span>
-                <input type="date" value={filterFrom} onChange={(e) => applyFilter(e.target.value, filterTo, filterCategory, filterMarketplace, filterStatus)} className="bg-transparent text-zinc-900 text-sm focus:outline-none" />
+                <input type="date" value={filterFrom} onChange={(e) => applyFilter(e.target.value, filterTo, filterCategory, filterMarketplace, filterStatus, filterFault, filterQueue, filterSearch, null, null, true)} className="bg-transparent text-zinc-900 text-sm focus:outline-none" />
               </div>
               <div className="flex items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2">
                 <span className="text-xs font-semibold text-zinc-600">To</span>
-                <input type="date" value={filterTo} onChange={(e) => applyFilter(filterFrom, e.target.value, filterCategory, filterMarketplace, filterStatus)} className="bg-transparent text-zinc-900 text-sm focus:outline-none" />
+                <input type="date" value={filterTo} onChange={(e) => applyFilter(filterFrom, e.target.value, filterCategory, filterMarketplace, filterStatus, filterFault, filterQueue, filterSearch, null, null, true)} className="bg-transparent text-zinc-900 text-sm focus:outline-none" />
               </div>
-              <select value={filterStatus} onChange={(e) => applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, e.target.value, filterQueue === 'warehouse' ? '' : filterQueue)} className="app-select"><option value="">All statuses</option>{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
-              <select value={filterCategory} onChange={(e) => applyFilter(filterFrom, filterTo, e.target.value, filterMarketplace, filterStatus)} className="app-select"><option value="">All categories</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
-              <select value={filterMarketplace} onChange={(e) => applyFilter(filterFrom, filterTo, filterCategory, e.target.value, filterStatus)} className="app-select"><option value="">All marketplaces</option>{marketplaces.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}</select>
+              <select value={filterStatus} onChange={(e) => applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, e.target.value, filterFault, filterQueue === 'warehouse' ? '' : filterQueue, filterSearch, null, null, true)} className="app-select"><option value="">All statuses</option>{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
+              <select value={filterCategory} onChange={(e) => applyFilter(filterFrom, filterTo, e.target.value, filterMarketplace, filterStatus, filterFault, filterQueue, filterSearch, null, null, true)} className="app-select"><option value="">All categories</option>{categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+              <select value={filterFault} onChange={(e) => applyFilter(filterFrom, filterTo, filterCategory, filterMarketplace, filterStatus, e.target.value, filterQueue, filterSearch, null, null, true)} className="app-select"><option value="">All faults</option>{FAULT_PARTY_VALUES.map(f => <option key={f} value={f}>{f}</option>)}</select>
+              <select value={filterMarketplace} onChange={(e) => applyFilter(filterFrom, filterTo, filterCategory, e.target.value, filterStatus, filterFault, filterQueue, filterSearch, null, null, true)} className="app-select"><option value="">All marketplaces</option>{marketplaces.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}</select>
               {hasActiveFilters && (
                 <button type="button" onClick={clearAllFilters} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white hover:bg-red-700 transition">
                   Clear
@@ -726,6 +788,8 @@ export default function DashboardClient({
           stats={stats}
           categoryColors={categoryColorByName}
           compact={isSearchActive}
+          activeMetricKey={activeMetricKey}
+          onMetricClick={handleMetricClick}
         />
 
         <div className="flex flex-col">
@@ -816,7 +880,12 @@ export default function DashboardClient({
           )}
         </div>
 
-        <div className={isSearchActive ? 'order-1' : 'order-2'}>
+        <div className={isSearchActive ? 'order-1' : 'order-2'} ref={incidentsTableRef}>
+        {activeMetricKey && (
+          <p className="text-sm font-semibold text-blue-800 mb-2 px-1">
+            Showing orders for the selected metric. Click the same metric again to clear.
+          </p>
+        )}
         {isSearchActive && (
           <p className="text-sm font-semibold text-zinc-800 mb-2 px-1">
             Search results for &ldquo;{filterSearch.trim()}&rdquo;

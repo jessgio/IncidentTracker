@@ -166,6 +166,7 @@ export async function fetchDashboardStats(
     category?: string
     marketplace?: string
     status?: string
+    fault?: string
     userId?: string
     search?: string
     queue?: IncidentListFilters['queue']
@@ -181,6 +182,7 @@ export async function fetchDashboardStats(
     p_category: filters.category || null,
     p_marketplace: filters.marketplace || null,
     p_status: filters.status || null,
+    p_fault_party: filters.fault || null,
     p_user_id: filters.userId || null,
   })
 
@@ -197,6 +199,7 @@ async function fetchSearchScopedDashboardStats(
     category?: string
     marketplace?: string
     status?: string
+    fault?: string
     userId?: string
     search?: string
     queue?: IncidentListFilters['queue']
@@ -208,6 +211,7 @@ async function fetchSearchScopedDashboardStats(
     cat: filters.category,
     mp: filters.marketplace,
     stat: filters.status,
+    fault: filters.fault,
     queue: filters.queue,
     search: filters.search,
     userId: filters.userId,

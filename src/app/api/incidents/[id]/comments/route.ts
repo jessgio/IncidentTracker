@@ -11,8 +11,8 @@ import {
   commentMentionSubject,
 } from '../../../../../lib/comment-mention-email'
 import { getAppOrigin } from '../../../../../lib/app-origin'
-import { isLarkConfigured, sendLarkText } from '../../../../../lib/lark'
-import { buildCommentLarkText, commentToLarkPlain } from '../../../../../lib/lark-messages'
+import { isLarkConfigured, sendLarkInteractive } from '../../../../../lib/lark'
+import { buildCommentLarkPost, commentToLarkPlain } from '../../../../../lib/lark-messages'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (isLarkConfigured('chat')) {
       const caseUrl = `${getAppOrigin(req.nextUrl.origin)}/incidents/${incidentId}`
       const authorName = senderProfile?.full_name || senderProfile?.email || 'A team member'
-      const larkText = buildCommentLarkText({
+      const larkCard = buildCommentLarkPost({
         orderNumber: incident.order_number || 'N/A',
         caseTitle: incident.title,
         status: incident.status || 'Unknown',
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         commentPlain: commentToLarkPlain(commentText),
         caseUrl,
       })
-      const larkResult = await sendLarkText(larkText, { webhookKind: 'chat' })
+      const larkResult = await sendLarkInteractive(larkCard, { webhookKind: 'chat' })
       if (!larkResult.ok) {
         console.error('Lark comment notify failed:', larkResult.error)
         larkError = larkResult.error

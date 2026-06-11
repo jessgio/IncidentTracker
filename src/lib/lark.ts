@@ -4,6 +4,17 @@ export type LarkWebhookKind = 'chat' | 'alerts'
 
 export type LarkSendResult = { ok: true } | { ok: false; error: string }
 
+export type LarkPostTextNode = { tag: 'text'; text: string }
+export type LarkPostLinkNode = { tag: 'a'; text: string; href: string }
+export type LarkPostParagraph = Array<LarkPostTextNode | LarkPostLinkNode>
+
+export type LarkPostPayload = {
+  zh_cn: {
+    title: string
+    content: LarkPostParagraph[]
+  }
+}
+
 function webhookUrl(kind: LarkWebhookKind): string | undefined {
   if (kind === 'alerts') {
     return process.env.LARK_ALERTS_WEBHOOK_URL || process.env.LARK_WEBHOOK_URL
@@ -25,8 +36,8 @@ function applySignature(body: Record<string, unknown>) {
   body.sign = sign
 }
 
-export async function sendLarkText(
-  text: string,
+async function sendLarkWebhook(
+  message: Record<string, unknown>,
   opts?: { webhookKind?: LarkWebhookKind }
 ): Promise<LarkSendResult> {
   const url = webhookUrl(opts?.webhookKind ?? 'chat')
@@ -34,10 +45,7 @@ export async function sendLarkText(
     return { ok: false, error: 'Lark webhook not configured' }
   }
 
-  const body: Record<string, unknown> = {
-    msg_type: 'text',
-    content: { text: text.slice(0, 4000) },
-  }
+  const body: Record<string, unknown> = { ...message }
   applySignature(body)
 
   try {
@@ -55,4 +63,54 @@ export async function sendLarkText(
     const message = err instanceof Error ? err.message : 'Lark request failed'
     return { ok: false, error: message }
   }
+}
+
+export async function sendLarkText(
+  text: string,
+  opts?: { webhookKind?: LarkWebhookKind }
+): Promise<LarkSendResult> {
+  return sendLarkWebhook(
+    {
+      msg_type: 'text',
+      content: { text: text.slice(0, 4000) },
+    },
+    opts
+  )
+}
+
+export async function sendLarkPost(
+  post: LarkPostPayload,
+  opts?: { webhookKind?: LarkWebhookKind }
+): Promise<LarkSendResult> {
+  return sendLarkWebhook(
+    {
+      msg_type: 'post',
+      content: { post },
+    },
+    opts
+  )
+}
+
+export type LarkInteractiveCard = {
+  header?: {
+    template?: string
+    title: { tag: 'plain_text'; content: string }
+  }
+  elements: Array<{
+    tag: 'div'
+    text: { tag: 'lark_md'; content: string }
+  }>
+}
+
+export async function sendLarkInteractive(
+  card: LarkInteractiveCard,
+  opts?: { webhookKind?: LarkWebhookKind }
+): Promise<LarkSendResult> {
+  return sendLarkWebhook(
+    {
+      msg_type: 'interactive',
+      card,
+    },
+    opts
+  )
 }

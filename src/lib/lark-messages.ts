@@ -1,11 +1,28 @@
 import { commentTextToPlain } from './comment-mentions'
+import type { LarkInteractiveCard } from './lark'
 
-function line(label: string, value: string | null | undefined) {
-  if (!value?.trim()) return ''
-  return `${label}: ${value.trim()}\n`
+function line(label: string, value: string | null | undefined): string | null {
+  if (!value?.trim()) return null
+  return `${label}: ${value.trim()}`
 }
 
-export function buildCommentLarkText(opts: {
+function compactMessage(parts: Array<string | null | undefined | false>): string {
+  return parts.filter((part): part is string => Boolean(part)).join('\n').trim()
+}
+
+function escapeLarkMd(text: string): string {
+  return text.replace(/([\\`*_[\]()#+\-.!|{}>])/g, '\\$1')
+}
+
+function larkMdParagraph(content: string) {
+  return {
+    tag: 'div' as const,
+    text: { tag: 'lark_md' as const, content },
+  }
+}
+
+/** Rich post-style comment card (interactive + lark_md for bold comment body). */
+export function buildCommentLarkPost(opts: {
   orderNumber: string
   caseTitle: string
   status: string
@@ -13,28 +30,34 @@ export function buildCommentLarkText(opts: {
   mentionedNames?: string[]
   commentPlain: string
   caseUrl: string
-}) {
+}): LarkInteractiveCard {
   const { orderNumber, caseTitle, status, authorName, mentionedNames, commentPlain, caseUrl } = opts
   const mentionedLine =
     mentionedNames && mentionedNames.length > 0
-      ? `Mentioned: ${mentionedNames.map(name => `@${name}`).join(', ')}\n`
-      : ''
-  return [
-    'Incident Tracker — 💬 New case comment',
-    '',
+      ? `Mentioned: ${mentionedNames.map(name => `@${name}`).join(', ')}`
+      : null
+  const metadata = compactMessage([
     line('Order', `#${orderNumber}`),
     line('Case', caseTitle),
     line('Status', status),
     line('From', authorName),
-    mentionedLine.trimEnd(),
-    '',
-    commentPlain.trim(),
-    '',
-    `Open case: ${caseUrl}`,
-  ]
-    .filter((row, i, arr) => row !== '' || (i > 0 && arr[i - 1] !== ''))
-    .join('\n')
-    .trim()
+    mentionedLine,
+  ])
+  const comment = commentPlain.trim()
+
+  return {
+    header: {
+      template: 'blue',
+      title: { tag: 'plain_text', content: 'Incident Tracker — 💬 New case comment' },
+    },
+    elements: [
+      larkMdParagraph(metadata),
+      larkMdParagraph(''),
+      larkMdParagraph(`**${escapeLarkMd(comment)}**`),
+      larkMdParagraph(''),
+      larkMdParagraph(`[Open case](${caseUrl})`),
+    ],
+  }
 }
 
 export function buildWaitingOnWarehouseLarkText(opts: {
@@ -55,20 +78,16 @@ export function buildWaitingOnWarehouseLarkText(opts: {
     actorName,
     caseUrl,
   } = opts
-  return [
+  return compactMessage([
     '📦 Warehouse handoff',
-    '',
     line('Order', `#${orderNumber}`),
     line('Case', caseTitle),
     line('Category', category ?? undefined),
     line('Marketplace', marketplace ?? undefined),
     line('Warehouse status', warehouseStatus ?? 'Requested'),
     line('Handed off by', actorName),
-    '',
     `Open case: ${caseUrl}`,
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ])
 }
 
 export function buildWarehouseCompletedLarkText(opts: {
@@ -78,16 +97,14 @@ export function buildWarehouseCompletedLarkText(opts: {
   caseUrl: string
 }) {
   const { orderNumber, caseTitle, actorName, caseUrl } = opts
-  return [
+  return compactMessage([
     '✅ Warehouse fulfillment completed',
-    '',
     line('Order', `#${orderNumber}`),
     line('Case', caseTitle),
     line('Completed by', actorName),
-  ]
-    .filter(Boolean)
-    .join('\n')
-    .concat(`\n\nCase returned to CS for customer follow-up.\nOpen case: ${caseUrl}`)
+    'Case returned to CS for customer follow-up.',
+    `Open case: ${caseUrl}`,
+  ])
 }
 
 export function commentToLarkPlain(commentText: string) {

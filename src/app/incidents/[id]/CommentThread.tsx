@@ -170,6 +170,12 @@ export default function CommentThread({
     if ((data as { emailFailures?: string[] }).emailFailures?.length) {
       console.warn('Some mention emails failed:', (data as { emailFailures: string[] }).emailFailures)
     }
+    const larkError = (data as { larkError?: string }).larkError
+    if (larkError) {
+      window.alert(
+        `Your comment was saved, but it could not be sent to the Lark chat group.\n\n${larkError}`
+      )
+    }
     setNewComment('')
     await fetchAll()
     setIsSubmitting(false)

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Resend } from 'resend'
 import { createClient } from '../../../../../utils/supabase/server'
-import { extractMentionedUserIds, commentTextToPlain } from '../../../../../lib/comment-mentions'
+import {
+  extractMentionedDisplayNames,
+  extractMentionedUserIds,
+  commentTextToPlain,
+} from '../../../../../lib/comment-mentions'
 import {
   buildCommentMentionEmailHtml,
   commentMentionSubject,
@@ -121,6 +125,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     let larkError: string | undefined
+    let larkSent = false
     if (isLarkConfigured('chat')) {
       const caseUrl = `${getAppOrigin(req.nextUrl.origin)}/incidents/${incidentId}`
       const authorName = senderProfile?.full_name || senderProfile?.email || 'A team member'
@@ -129,6 +134,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         caseTitle: incident.title,
         status: incident.status || 'Unknown',
         authorName,
+        mentionedNames: extractMentionedDisplayNames(commentText),
         commentPlain: commentToLarkPlain(commentText),
         caseUrl,
       })
@@ -136,6 +142,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       if (!larkResult.ok) {
         console.error('Lark comment notify failed:', larkResult.error)
         larkError = larkResult.error
+      } else {
+        larkSent = true
       }
     }
 
@@ -144,6 +152,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       commentId: comment.id,
       mentionsNotified,
       emailFailures: emailFailures.length > 0 ? emailFailures : undefined,
+      larkSent,
       larkError,
     })
   } catch (err) {

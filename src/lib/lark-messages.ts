@@ -10,17 +10,23 @@ export function buildCommentLarkText(opts: {
   caseTitle: string
   status: string
   authorName: string
+  mentionedNames?: string[]
   commentPlain: string
   caseUrl: string
 }) {
-  const { orderNumber, caseTitle, status, authorName, commentPlain, caseUrl } = opts
+  const { orderNumber, caseTitle, status, authorName, mentionedNames, commentPlain, caseUrl } = opts
+  const mentionedLine =
+    mentionedNames && mentionedNames.length > 0
+      ? `Mentioned: ${mentionedNames.map(name => `@${name}`).join(', ')}\n`
+      : ''
   return [
-    '💬 New case comment',
+    'Incident Tracker — 💬 New case comment',
     '',
     line('Order', `#${orderNumber}`),
     line('Case', caseTitle),
     line('Status', status),
     line('From', authorName),
+    mentionedLine.trimEnd(),
     '',
     commentPlain.trim(),
     '',

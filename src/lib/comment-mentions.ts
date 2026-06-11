@@ -15,6 +15,16 @@ export function extractMentionedUserIds(text: string): string[] {
   return [...ids]
 }
 
+export function extractMentionedDisplayNames(text: string): string[] {
+  const names: string[] = []
+  const re = new RegExp(MENTION_TOKEN_REGEX.source, 'gi')
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    names.push(m[1])
+  }
+  return names
+}
+
 /** Plain text for emails and previews (tokens → @Name). */
 export function commentTextToPlain(text: string) {
   return text.replace(MENTION_TOKEN_REGEX, (_, name: string) => `@${name}`)

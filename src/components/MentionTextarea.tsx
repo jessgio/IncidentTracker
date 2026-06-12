@@ -155,7 +155,7 @@ export function MentionTextarea({
         aria-autocomplete={activeMention ? 'list' : undefined}
       />
       <p className="mt-1 text-xs text-zinc-500">
-        Comments are mirrored to Lark. Type <span className="font-mono">@</span> to mention a teammate — they will also get an email.
+        Type <span className="font-mono">@</span> to mention a teammate — they will get an email and the chat will be notified in Lark.
       </p>
     </div>
   )

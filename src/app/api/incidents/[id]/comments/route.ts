@@ -67,7 +67,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Could not save comment.' }, { status: 500 })
     }
 
-    const mentionIds = extractMentionedUserIds(commentText).filter(
+    const mentionedUserIds = extractMentionedUserIds(commentText)
+    const mentionIds = mentionedUserIds.filter(
       id => id.toLowerCase() !== user.id.toLowerCase()
     )
 
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     let larkError: string | undefined
     let larkSent = false
-    if (isLarkConfigured('chat')) {
+    if (mentionedUserIds.length > 0 && isLarkConfigured('chat')) {
       const caseUrl = `${getAppOrigin(req.nextUrl.origin)}/incidents/${incidentId}`
       const authorName = senderProfile?.full_name || senderProfile?.email || 'A team member'
       const larkCard = buildCommentLarkPost({

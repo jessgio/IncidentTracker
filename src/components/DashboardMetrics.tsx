@@ -138,7 +138,24 @@ function statusCountsForPic(pic: PicWorkload) {
     .filter(s => s.count > 0)
 }
 
-function PicWorkloadRowHeader({
+const PIC_WORKLOAD_GRID = 'grid grid-cols-[minmax(0,1fr)_6.5rem_4.5rem_3rem] gap-x-4 items-center'
+
+function PicWorkloadColumnHeaders() {
+  return (
+    <div className={`${PIC_WORKLOAD_GRID} mb-2 px-4`}>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Assignee</span>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 text-right leading-tight">
+        Avg first response
+      </span>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 text-right leading-tight">
+        SLA breaches
+      </span>
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 text-right">Active</span>
+    </div>
+  )
+}
+
+function PicWorkloadRow({
   name,
   nameClass = 'text-zinc-900',
   total,
@@ -154,16 +171,19 @@ function PicWorkloadRowHeader({
   slaBreaches: number
 }) {
   return (
-    <div className="flex items-center gap-2 mb-2 min-w-0">
-      <span className={`text-sm font-semibold truncate shrink-0 max-w-[38%] ${nameClass}`}>{name}</span>
-      <span className="text-[11px] font-medium text-zinc-500 tabular-nums whitespace-nowrap flex-1 text-center">
-        {formatHours(avgFirstResponseHours)} avg
-        <span className="mx-1.5 text-zinc-300">·</span>
-        <span className={slaBreaches > 0 ? 'text-red-700 font-semibold' : ''}>
-          {slaBreaches} SLA
-        </span>
+    <div className={PIC_WORKLOAD_GRID}>
+      <span className={`text-sm font-semibold truncate min-w-0 ${nameClass}`}>{name}</span>
+      <span className="text-lg font-semibold tabular-nums text-right text-zinc-900">
+        {formatHours(avgFirstResponseHours)}
       </span>
-      <span className={`text-lg font-semibold tabular-nums shrink-0 ${totalClass}`}>{total}</span>
+      <span
+        className={`text-lg font-semibold tabular-nums text-right ${
+          slaBreaches > 0 ? 'text-red-700' : 'text-zinc-900'
+        }`}
+      >
+        {slaBreaches}
+      </span>
+      <span className={`text-lg font-semibold tabular-nums text-right ${totalClass}`}>{total}</span>
     </div>
   )
 }
@@ -376,7 +396,9 @@ function PicWorkloadCard({
       {rows.length === 0 ? (
         <p className="text-sm text-zinc-600">No active cases in the current filter.</p>
       ) : (
-        <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
+        <div className="max-h-[320px] overflow-y-auto pr-1">
+          <PicWorkloadColumnHeaders />
+          <div className="space-y-3">
           {assigned.map(pic => {
             const picKey = pic.pic_id ? `pic:${pic.pic_id}` : 'pic:unassigned'
             const isActive = activeMetricKey === picKey
@@ -388,13 +410,13 @@ function PicWorkloadCard({
                 className={`w-full text-left rounded-lg border border-zinc-200 bg-zinc-50/80 px-4 py-3 transition hover:bg-zinc-100/80 ${activeRing(isActive)}`}
                 aria-pressed={isActive}
               >
-                <PicWorkloadRowHeader
+                <PicWorkloadRow
                   name={pic.pic_name}
                   total={pic.total_active}
                   avgFirstResponseHours={pic.avg_first_response_hours}
                   slaBreaches={pic.sla_breaches}
                 />
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 mt-2">
                   {statusCountsForPic(pic).map(s => {
                     const sm = statusMeta(s.name)
                     return (
@@ -418,7 +440,7 @@ function PicWorkloadCard({
               className={`w-full text-left rounded-lg border border-dashed border-amber-300 bg-amber-50/60 px-4 py-3 transition hover:bg-amber-50 ${activeRing(activeMetricKey === 'pic:unassigned')}`}
               aria-pressed={activeMetricKey === 'pic:unassigned'}
             >
-              <PicWorkloadRowHeader
+              <PicWorkloadRow
                 name="Unassigned"
                 nameClass="text-amber-950"
                 total={unassigned.total_active}
@@ -426,7 +448,7 @@ function PicWorkloadCard({
                 avgFirstResponseHours={unassigned.avg_first_response_hours}
                 slaBreaches={unassigned.sla_breaches}
               />
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 mt-2">
                 {statusCountsForPic(unassigned).map(s => {
                   const sm = statusMeta(s.name)
                   return (
@@ -442,6 +464,7 @@ function PicWorkloadCard({
               </div>
             </button>
           )}
+          </div>
         </div>
       )}
     </div>

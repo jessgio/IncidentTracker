@@ -7,6 +7,8 @@ const CLOSED_STATUSES = ['Resolved', 'Closed'] as const
 
 export type ChartRow = { name: string; count: number; percentage?: number }
 
+export type FinancialRow = { name: string; amount: number; percentage?: number }
+
 export type PicWorkload = {
   pic_id: string | null
   pic_name: string
@@ -38,7 +40,7 @@ export type DashboardStats = {
   by_category: ChartRow[]
   by_marketplace: ChartRow[]
   by_fault: ChartRow[]
-  by_blocked: ChartRow[]
+  by_fault_financial: FinancialRow[]
   by_pic: PicWorkload[]
   trend: DashboardTrend
 }
@@ -60,7 +62,7 @@ export const EMPTY_STATS: DashboardStats = {
   by_category: [],
   by_marketplace: [],
   by_fault: [],
-  by_blocked: [],
+  by_fault_financial: [],
   by_pic: [],
   trend: { this_week: 0, last_week: 0, this_week_resolved: 0, last_week_resolved: 0 },
 }
@@ -101,6 +103,12 @@ function withPercentages(rows: ChartRow[], total: number): ChartRow[] {
     .map(r => ({ ...r, percentage: Math.round((r.count / (total || 1)) * 100) }))
 }
 
+function withFinancialPercentages(rows: FinancialRow[], total: number): FinancialRow[] {
+  return rows
+    .filter(r => r.amount > 0)
+    .map(r => ({ ...r, percentage: Math.round((r.amount / (total || 1)) * 100) }))
+}
+
 export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardStats {
   if (!raw || typeof raw !== 'object') return EMPTY_STATS
   const d = raw as Record<string, unknown>
@@ -135,7 +143,15 @@ export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardSta
     by_category: withPercentages(rows('by_category'), totalForPct || total),
     by_marketplace: withPercentages(rows('by_marketplace'), totalForPct || total),
     by_fault: withPercentages(rows('by_fault'), totalForPct || total),
-    by_blocked: rows('by_blocked'),
+    by_fault_financial: withFinancialPercentages(
+      Array.isArray(d.by_fault_financial)
+        ? (d.by_fault_financial as { name: string; amount: number }[]).map(r => ({
+            name: String(r.name),
+            amount: Number(r.amount),
+          }))
+        : [],
+      Number(d.financial_impact ?? 0)
+    ),
     by_pic: Array.isArray(d.by_pic)
       ? (d.by_pic as Record<string, unknown>[]).map(row => ({
           pic_id: row.pic_id != null && row.pic_id !== '' ? String(row.pic_id) : null,

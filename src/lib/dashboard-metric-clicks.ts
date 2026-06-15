@@ -1,5 +1,4 @@
 import type { MetricFilter } from './incident-list-filters'
-import { BLOCKED_PARTY_STATUS } from './incident-list-filters'
 
 export type DashboardMetricClick =
   | { key: 'sla' }
@@ -19,7 +18,6 @@ export type DashboardMetricClick =
   | { key: 'category'; category: string }
   | { key: 'marketplace'; marketplace: string }
   | { key: 'fault'; fault: string }
-  | { key: 'blocked'; party: 'Warehouse' | 'Customer' | 'Marketplace' }
   | { key: 'pic'; picId: string | null }
 
 export type MetricClickResult = {
@@ -44,8 +42,6 @@ export function metricClickActiveKey(click: DashboardMetricClick): string {
       return `marketplace:${click.marketplace}`
     case 'fault':
       return `fault:${click.fault}`
-    case 'blocked':
-      return `blocked:${click.party}`
     case 'pic':
       return click.picId ? `pic:${click.picId}` : 'pic:unassigned'
     default:
@@ -117,8 +113,6 @@ export function resolveMetricClick(
       return { ...base, marketplace: click.marketplace }
     case 'fault':
       return { ...base, fault: click.fault }
-    case 'blocked':
-      return { ...base, status: BLOCKED_PARTY_STATUS[click.party] }
     case 'pic':
       return { ...base, metric: { kind: 'assigned_to', picId: click.picId } }
   }

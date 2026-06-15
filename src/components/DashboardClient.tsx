@@ -415,7 +415,7 @@ export default function DashboardClient({
       if (activeMetricKey?.startsWith('category:')) nextCat = ''
       if (activeMetricKey?.startsWith('marketplace:')) nextMp = ''
       if (activeMetricKey?.startsWith('fault:')) nextFault = ''
-      if (activeMetricKey?.startsWith('status:') || activeMetricKey?.startsWith('blocked:')) nextStat = ''
+      if (activeMetricKey?.startsWith('status:')) nextStat = ''
       nextQueue = userRole === 'warehouse' ? 'warehouse' : ''
       applyFilter(filterFrom, filterTo, nextCat, nextMp, nextStat, nextFault, nextQueue, filterSearch, null, null)
       return

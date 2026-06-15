@@ -579,29 +579,39 @@ export default function DashboardMetrics({
         </div>
 
         <div className="app-card p-5">
-          <h3 className="text-sm font-semibold text-zinc-900 mb-3">Blocked by</h3>
-          {stats.by_blocked.length === 0 ? (
-            <p className="text-sm text-zinc-600 font-medium">No cases waiting on external parties</p>
+          <h3 className="text-sm font-semibold text-zinc-900 mb-3">Financial impact by fault party</h3>
+          {stats.by_fault_financial.length === 0 ? (
+            <p className="text-sm text-zinc-600 font-medium">No financial impact in the current filter</p>
           ) : (
-            <div className="space-y-2">
-              {stats.by_blocked.map(row => {
-                const party = row.name as 'Warehouse' | 'Customer' | 'Marketplace'
-                const rowKey = `blocked:${party}`
+            <div className="space-y-3">
+              {stats.by_fault_financial.map(row => {
+                const rowKey = `fault:${row.name}`
                 const isActive = activeMetricKey === rowKey
-                const interactive = !!click && row.count > 0
+                const interactive = !!click && row.amount > 0
                 const Tag = interactive ? 'button' : 'div'
                 return (
                   <Tag
                     key={row.name}
                     type={interactive ? 'button' : undefined}
-                    onClick={interactive ? () => click({ key: 'blocked', party }) : undefined}
-                    className={`flex justify-between text-sm font-semibold w-full rounded-lg px-1 py-1 -mx-1 transition ${activeRing(isActive)} ${
+                    onClick={interactive ? () => click({ key: 'fault', fault: row.name }) : undefined}
+                    className={`w-full text-left rounded-lg p-1 -mx-1 transition ${activeRing(isActive)} ${
                       interactive ? 'cursor-pointer hover:bg-zinc-50' : ''
                     }`}
                     aria-pressed={interactive ? isActive : undefined}
                   >
-                    <span className="text-zinc-700">{row.name}</span>
-                    <span className="tabular-nums text-zinc-900">{row.count}</span>
+                    <div className="flex justify-between text-xs mb-1 font-semibold text-zinc-800">
+                      <span className="truncate pr-2">{row.name}</span>
+                      <span className="shrink-0 tabular-nums text-violet-900">
+                        {formatIdr(row.amount)}
+                        {row.percentage != null ? ` (${row.percentage}%)` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full bg-violet-100 rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full bg-violet-500"
+                        style={{ width: `${row.percentage ?? 100}%` }}
+                      />
+                    </div>
                   </Tag>
                 )
               })}

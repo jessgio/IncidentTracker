@@ -15,12 +15,6 @@ export type MetricFilter =
   | { kind: 'has_resolution' }
   | { kind: 'assigned_to'; picId: string | null }
 
-export const BLOCKED_PARTY_STATUS: Record<'Warehouse' | 'Customer' | 'Marketplace', string> = {
-  Warehouse: 'Waiting on Warehouse',
-  Customer: 'Waiting on Customer',
-  Marketplace: 'Waiting on Marketplace',
-}
-
 export type IncidentListFilters = {
   from?: string
   to?: string

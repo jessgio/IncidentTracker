@@ -13,6 +13,8 @@ export type PicWorkload = {
   pic_id: string | null
   pic_name: string
   total_active: number
+  avg_first_response_hours: number | null
+  sla_breaches: number
   by_status: ChartRow[]
 }
 
@@ -157,6 +159,9 @@ export function parseDashboardStats(raw: unknown, totalForPct = 0): DashboardSta
           pic_id: row.pic_id != null && row.pic_id !== '' ? String(row.pic_id) : null,
           pic_name: String(row.pic_name ?? 'Unassigned'),
           total_active: Number(row.total_active ?? 0),
+          avg_first_response_hours:
+            row.avg_first_response_hours != null ? Number(row.avg_first_response_hours) : null,
+          sla_breaches: Number(row.sla_breaches ?? 0),
           by_status: Array.isArray(row.by_status)
             ? (row.by_status as { name: string; count: number }[]).map(s => ({
                 name: String(s.name),

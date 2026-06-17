@@ -57,6 +57,10 @@ export function canDeleteIncidents(role: UserRole | string | null | undefined): 
   return role === 'manager' || role === 'cs'
 }
 
+export function canManageUserPasswords(role: UserRole | string | null | undefined): boolean {
+  return role === 'manager'
+}
+
 export function statusChangePatch(
   newStatus: string,
   prev?: { resolved_at?: string | null; warehouse_status?: string | null }

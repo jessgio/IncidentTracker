@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
 import { createClient } from '../utils/supabase/client'
 import { ManageListsModal } from './ManageListsModal'
+import { ManageUsersModal } from './ManageUsersModal'
 import DashboardMetrics from './DashboardMetrics'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, formatExtraValue, formatDateOnly, csvEscape,
@@ -14,7 +15,7 @@ import {
 import {
   STATUS_VALUES, DEFAULT_STATUS, WAITING_ON_WAREHOUSE,
   DASHBOARD_TABLE_EXTRA_KEYS, statusMeta, statusChangePatch,
-  categoryRingStyle, CATEGORY_COLOR_OPTIONS, canDeleteIncidents,
+  categoryRingStyle, CATEGORY_COLOR_OPTIONS, canDeleteIncidents, canManageUserPasswords,
   type UserRole,
 } from '../lib/incident-status'
 import { deleteIncident } from '../lib/delete-incident'
@@ -242,6 +243,7 @@ export default function DashboardClient({
   const [isAddingMp, setIsAddingMp] = useState(false)
   const [isAddingCat, setIsAddingCat] = useState(false)
   const [showManageLists, setShowManageLists] = useState(false)
+  const [showManageUsers, setShowManageUsers] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [deletingIncidentId, setDeletingIncidentId] = useState<string | null>(null)
@@ -251,6 +253,7 @@ export default function DashboardClient({
   const supabase = createClient()
   const router = useRouter()
   const canDeleteCases = canDeleteIncidents(userRole)
+  const canManageUsers = canManageUserPasswords(userRole)
 
   const updateExtraForm = (key: ExtraFieldKey, value: string) => setExtraForm(prev => ({ ...prev, [key]: value }))
 
@@ -734,6 +737,11 @@ export default function DashboardClient({
               {isExporting ? 'Exporting…' : 'Export CSV'}
             </button>
             <button onClick={() => setShowManageLists(true)} className="app-btn-secondary">Manage lists</button>
+            {canManageUsers && (
+              <button onClick={() => setShowManageUsers(true)} className="app-btn-secondary">
+                Manage users
+              </button>
+            )}
             <span className="app-chip max-w-[220px] truncate" title={userEmail}>
               <span className="w-2 h-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
               {userEmail}
@@ -1150,6 +1158,7 @@ export default function DashboardClient({
         </div>
 
         {showManageLists && <ManageListsModal onClose={() => setShowManageLists(false)} />}
+        {showManageUsers && <ManageUsersModal onClose={() => setShowManageUsers(false)} />}
       </div>
     </div>
   )

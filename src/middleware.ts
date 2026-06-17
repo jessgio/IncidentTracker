@@ -32,7 +32,10 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   // Cron routes authenticate via CRON_SECRET bearer token, not session cookies.
-  if (request.nextUrl.pathname.startsWith('/api/cron')) {
+  if (
+    request.nextUrl.pathname.startsWith('/api/cron') ||
+    request.nextUrl.pathname.startsWith('/api/auth/')
+  ) {
     return supabaseResponse
   }
 

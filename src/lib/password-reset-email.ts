@@ -10,6 +10,20 @@ export function passwordResetSubject() {
   return 'Reset your Aeris CS Dashboard password'
 }
 
+export function buildPasswordResetEmailText(opts: { resetUrl: string }) {
+  const { resetUrl } = opts
+  return [
+    'Reset your Aeris CS Dashboard password',
+    '',
+    'We received a request to reset your password. Open the link below to choose a new one.',
+    'This link expires in one hour.',
+    '',
+    resetUrl,
+    '',
+    "If you didn't request this, you can safely ignore this email.",
+  ].join('\n')
+}
+
 export function buildPasswordResetEmailHtml(opts: { resetUrl: string }) {
   const { resetUrl } = opts
   return `

@@ -138,7 +138,7 @@ export async function GET(req: Request) {
               <ul style="background: #f8fafc; padding: 20px; border-radius: 8px;">
                 ${ticketListHTML}
               </ul>
-              <p>Log into the Incident Dashboard to resolve these today. Thank you!</p>
+              <p>Log into the Aeris CS Dashboard to resolve these today. Thank you!</p>
             </div>
           `
         })

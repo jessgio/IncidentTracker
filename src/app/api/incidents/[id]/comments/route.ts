@@ -93,7 +93,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           process.env.MENTION_NOTIFY_FROM ||
           process.env.WAREHOUSE_NOTIFY_FROM ||
           process.env.REPORT_FROM ||
-          'Incident Tracker <reports@aerisbeaute.com>'
+          'Aeris CS Dashboard <reports@aerisbeaute.com>'
 
         const html = buildCommentMentionEmailHtml({
           orderNumber: incident.order_number || 'N/A',

@@ -36,8 +36,15 @@ export async function middleware(request: NextRequest) {
     return supabaseResponse
   }
 
-  // Protect the dashboard: If no user and the exact path is not /login, redirect to /login
-  if (!user && !request.nextUrl.pathname.startsWith('/login')) {
+  const publicPaths = ['/login', '/forgot-password', '/auth/callback']
+  const isPublicPath = publicPaths.some(
+    (path) =>
+      request.nextUrl.pathname === path ||
+      request.nextUrl.pathname.startsWith('/auth/')
+  )
+
+  // Protect the dashboard: unauthenticated users may only access public auth routes
+  if (!user && !isPublicPath) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)

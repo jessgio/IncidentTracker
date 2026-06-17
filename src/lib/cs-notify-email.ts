@@ -82,9 +82,9 @@ export function buildCsNotifyEmailHtml(opts: {
           ${rows}
         </table>
         <p style="margin: 28px 0 0; text-align: center;">
-          <a href="${esc(caseUrl)}" style="display: inline-block; background: #2563eb; color: #ffffff; font-weight: 600; font-size: 14px; text-decoration: none; padding: 12px 28px; border-radius: 8px;">Open case in Incident Tracker</a>
+          <a href="${esc(caseUrl)}" style="display: inline-block; background: #2563eb; color: #ffffff; font-weight: 600; font-size: 14px; text-decoration: none; padding: 12px 28px; border-radius: 8px;">Open case in Aeris CS Dashboard</a>
         </p>
-        <p style="margin: 20px 0 0; font-size: 12px; color: #94a3b8; text-align: center;">Sent by ${esc(senderName)} · Incident Tracker</p>
+        <p style="margin: 20px 0 0; font-size: 12px; color: #94a3b8; text-align: center;">Sent by ${esc(senderName)} · Aeris CS Dashboard</p>
       </div>
     </div>
   `.trim()

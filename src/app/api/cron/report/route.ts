@@ -120,7 +120,7 @@ export async function GET(req: Request) {
     `
 
     // 7. Send Email via Resend
-    const reportFrom = process.env.REPORT_FROM || 'Incident Tracker <reports@aerisbeaute.com>'
+    const reportFrom = process.env.REPORT_FROM || 'Aeris CS Dashboard <reports@aerisbeaute.com>'
     const reportRecipients = (process.env.REPORT_RECIPIENTS || 'jsc.giovanni@gmail.com,jessica@aerisbeaute.com')
       .split(',')
       .map(addr => addr.trim())

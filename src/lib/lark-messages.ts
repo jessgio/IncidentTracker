@@ -48,7 +48,7 @@ export function buildCommentLarkPost(opts: {
   return {
     header: {
       template: 'blue',
-      title: { tag: 'plain_text', content: 'Incident Tracker — 💬 New case comment' },
+      title: { tag: 'plain_text', content: 'Aeris CS Dashboard — 💬 New case comment' },
     },
     elements: [
       larkMdParagraph(metadata),

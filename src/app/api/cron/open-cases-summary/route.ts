@@ -40,7 +40,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://incident-tracker.vercel.app').replace(/\/$/, '')
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://aeris-cs-dashboard.vercel.app').replace(/\/$/, '')
     const reportDate = jakartaDateLabel()
 
     const { data: openIncidents, error: incError } = await supabase
@@ -166,7 +166,7 @@ Rules:
       return NextResponse.json({ message: 'No users with email addresses found.' })
     }
 
-    const summaryFrom = process.env.SUMMARY_FROM || process.env.REPORT_FROM || 'Incident Tracker <reports@aerisbeaute.com>'
+    const summaryFrom = process.env.SUMMARY_FROM || process.env.REPORT_FROM || 'Aeris CS Dashboard <reports@aerisbeaute.com>'
     const subject = openCasesSummarySubject(cases.length, reportDate)
 
     let sent = 0

@@ -98,7 +98,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       process.env.CS_NOTIFY_FROM ||
       process.env.WAREHOUSE_NOTIFY_FROM ||
       process.env.REPORT_FROM ||
-      'Incident Tracker <reports@aerisbeaute.com>'
+      'Aeris CS Dashboard <reports@aerisbeaute.com>'
 
     const template = getCsNotifyTemplate(templateId)
     const emailMessage = appendNotifyShippingDetails(message, incident)

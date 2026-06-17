@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { login, signup } from './actions'
 
 export default async function LoginPage(props: {
@@ -5,13 +6,14 @@ export default async function LoginPage(props: {
 }) {
   const searchParams = await props.searchParams
   const message = searchParams.message as string | undefined
+  const success = searchParams.success as string | undefined
 
   return (
     <div className="app-page flex flex-1 items-center justify-center px-4 py-12">
       <div className="app-card w-full max-w-md p-8">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-            Incident Tracker
+            Aeris CS Dashboard
           </h1>
           <p className="mt-2 text-sm text-zinc-600">Sign in to manage cases</p>
         </div>
@@ -44,7 +46,17 @@ export default async function LoginPage(props: {
           </div>
 
           <div>
-            <label className="app-label" htmlFor="password">Password</label>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label className="app-label mb-0" htmlFor="password">
+                Password
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs font-medium text-blue-600 hover:text-blue-700"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <input
               id="password"
               className="app-input"
@@ -64,6 +76,15 @@ export default async function LoginPage(props: {
               Create account
             </button>
           </div>
+
+          {success && (
+            <p
+              role="status"
+              className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-center text-sm font-medium text-green-800"
+            >
+              {success}
+            </p>
+          )}
 
           {message && (
             <p

@@ -35,7 +35,7 @@ export const CS_NOTIFY_TEMPLATES: CsNotifyTemplate[] = [
         `Hi CS team,\n\n` +
           `The warehouse request for order #${orderNumber} has been completed.\n\n` +
           statusLine +
-          `Please proceed with customer follow-up and update the case in Incident Tracker as needed.\n\n` +
+          `Please proceed with customer follow-up and update the case in Aeris CS Dashboard as needed.\n\n` +
           `Thank you.`,
         ctx
       )

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Incident Tracker",
+  title: "Aeris CS Dashboard",
   description: "Track customer complaints and warehouse handoffs",
 };
 

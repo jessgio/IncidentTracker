@@ -444,7 +444,7 @@ export default function CommentThread({
                         const val = incident[field.key as keyof IncidentExtraDbFields]
                         if (val === null || val === undefined || val === '') return null
                         return (
-                          <div key={field.key} className={field.type === 'textarea' && !field.formClass ? 'col-span-2 md:col-span-3' : ''}>
+                          <div key={field.key} className={field.type === 'textarea' && !('formClass' in field && field.formClass) ? 'col-span-2 md:col-span-3' : ''}>
                             <p className="app-label mb-1">{field.label}</p>
                             <p className="text-sm text-zinc-900 whitespace-pre-wrap leading-relaxed bg-zinc-50 border border-zinc-200 px-3 py-2 rounded-lg">{formatExtraValue(val, field.type)}</p>
                           </div>

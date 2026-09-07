@@ -5,7 +5,7 @@ import {
   type ExtraFormState,
   type ExtraFieldKey,
 } from './incident-extra-fields'
-import { DEFAULT_STATUS, STATUS_VALUES, type IncidentStatus } from './incident-status'
+import { DEFAULT_STATUS, STATUS_VALUES, resolveStatusBlockReason, type IncidentStatus } from './incident-status'
 
 export type ImportColumn = {
   key: string
@@ -315,6 +315,12 @@ export function parseImportTable(
     }
 
     if (errors.some(e => e.rowNumber === rowNumber)) continue
+
+    const resolveBlocked = resolveStatusBlockReason(status, extra)
+    if (resolveBlocked) {
+      errors.push({ rowNumber, message: resolveBlocked })
+      continue
+    }
 
     rows.push({
       rowNumber,

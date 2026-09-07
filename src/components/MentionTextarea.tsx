@@ -22,6 +22,7 @@ export function MentionTextarea({
   placeholder,
   className,
   onSubmit,
+  emailAlertsEnabled,
 }: {
   value: string
   onChange: (value: string) => void
@@ -31,6 +32,7 @@ export function MentionTextarea({
   placeholder?: string
   className?: string
   onSubmit?: () => void
+  emailAlertsEnabled?: boolean
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [activeMention, setActiveMention] = useState<MentionActiveQuery | null>(null)
@@ -155,7 +157,10 @@ export function MentionTextarea({
         aria-autocomplete={activeMention ? 'list' : undefined}
       />
       <p className="mt-1 text-xs text-zinc-500">
-        Type <span className="font-mono">@</span> to mention a teammate — they will get an email and the chat will be notified in Lark.
+        Type <span className="font-mono">@</span> to mention a teammate
+        {emailAlertsEnabled
+          ? ' — they will get an email and the chat will be notified in Lark.'
+          : ' — Lark is notified; email stays off unless Email alerts is on for this case.'}
       </p>
     </div>
   )

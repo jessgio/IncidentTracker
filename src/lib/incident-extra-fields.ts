@@ -38,8 +38,8 @@ export const incidentExtraFields = [
   {
     key: 'action_taken',
     label: 'Action',
-    type: 'text',
-    placeholder: 'Replacement / Refund / Voucher / Other',
+    type: 'select',
+    options: ['', 'Replacement', 'Refund', 'Voucher', 'Other'],
     tableClass: 'min-w-[220px]',
   },
   {
@@ -62,6 +62,15 @@ export const incidentExtraFields = [
     type: 'textarea',
     placeholder: 'Final resolution',
     tableClass: 'min-w-[280px]',
+    formClass: 'md:col-span-1 lg:col-span-2',
+  },
+  {
+    key: 'affected_product',
+    label: 'Produk Terkendala',
+    type: 'text',
+    placeholder: 'Product name / SKU',
+    tableClass: 'min-w-[200px]',
+    formClass: 'md:col-span-1 lg:col-span-2',
   },
   {
     key: 'fault_party',
@@ -126,6 +135,7 @@ export const incidentExtraFields = [
   placeholder?: string
   options?: readonly string[]
   tableClass?: string
+  formClass?: string
 }[]
 
 export type ExtraFieldKey = typeof incidentExtraFields[number]['key']
@@ -214,6 +224,24 @@ export function formatExtraValue(
 
 export function csvEscape(value: unknown) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`
+}
+
+export function extraFieldFormClass(field: {
+  type: ExtraFieldType
+  formClass?: string
+}) {
+  if (field.formClass) return field.formClass
+  return field.type === 'textarea' ? 'md:col-span-2 lg:col-span-4' : ''
+}
+
+export function extraSelectOptions(
+  options: readonly string[] | undefined,
+  current?: string | null
+) {
+  const list = [...(options ?? [''])]
+  const value = current ?? ''
+  if (value && !list.includes(value)) list.push(value)
+  return list
 }
 
 // Date-only columns (e.g. complaint_date) are stored as `YYYY-MM-DD`. Passing that

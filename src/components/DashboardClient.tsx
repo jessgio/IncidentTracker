@@ -2,19 +2,21 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, ChevronsUpDown, Copy } from 'lucide-react'
 import { createClient } from '../utils/supabase/client'
 import { ManageListsModal } from './ManageListsModal'
 import { ManageUsersModal } from './ManageUsersModal'
 import DashboardMetrics from './DashboardMetrics'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, formatExtraValue, formatDateOnly, csvEscape,
+  extraFieldFormClass, extraSelectOptions,
   FAULT_PARTY_VALUES,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../lib/incident-extra-fields'
 import {
   STATUS_VALUES, DEFAULT_STATUS, WAITING_ON_WAREHOUSE,
   DASHBOARD_TABLE_EXTRA_KEYS, statusMeta, statusChangePatch,
+  resolveStatusBlockReason, missingResolveFields,
   categoryRingStyle, CATEGORY_COLOR_OPTIONS, canDeleteIncidents, canManageUserPasswords,
   type UserRole,
 } from '../lib/incident-status'
@@ -28,6 +30,11 @@ import {
   type DashboardSortColumn,
   type SortDirection,
 } from '../lib/dashboard-table-sort'
+import {
+  loadDashboardView,
+  saveDashboardView,
+  type QueuePreset,
+} from '../lib/dashboard-view-state'
 import { attachmentKind, canPreviewInline } from '../lib/attachment-utils'
 import {
   buildImportTemplateXlsx,
@@ -158,6 +165,53 @@ function InlineAdd({ onAdd, onCancel, placeholder, extraField }: any) {
   )
 }
 
+function OrderNumberCell({ orderNumber }: { orderNumber: string }) {
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current)
+  }, [])
+
+  const copyOrderNumber = async () => {
+    const text = orderNumber.trim()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const input = document.createElement('textarea')
+      input.value = text
+      input.setAttribute('readonly', '')
+      input.style.position = 'fixed'
+      input.style.left = '-9999px'
+      document.body.appendChild(input)
+      input.select()
+      document.execCommand('copy')
+      document.body.removeChild(input)
+    }
+    setCopied(true)
+    if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1200)
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => { void copyOrderNumber() }}
+      title={copied ? 'Copied' : 'Click to copy order number'}
+      className="inline-flex max-w-full items-center gap-1 font-mono text-xs font-semibold bg-zinc-100 hover:bg-blue-50 text-zinc-800 hover:text-blue-800 px-2 py-1 rounded-md border border-zinc-200 hover:border-blue-300 transition"
+    >
+      <span className="truncate select-all">#{orderNumber}</span>
+      {copied ? (
+        <Check className="w-3 h-3 shrink-0 text-emerald-600" aria-hidden />
+      ) : (
+        <Copy className="w-3 h-3 shrink-0 text-zinc-500" aria-hidden />
+      )}
+      <span className="sr-only">{copied ? 'Copied' : 'Copy order number'}</span>
+    </button>
+  )
+}
+
 function EditableCell({ field, value, onSave }: { field: any, value: any, onSave: (val: string) => void }) {
   const [isEditing, setIsEditing] = useState(false)
   const [tempVal, setTempVal] = useState('')
@@ -181,7 +235,7 @@ function EditableCell({ field, value, onSave }: { field: any, value: any, onSave
     <div onClick={(e) => e.stopPropagation()} className="relative w-full">
       {field.type === 'select' ? (
         <select autoFocus value={tempVal} onChange={(e) => setTempVal(e.target.value)} onBlur={handleSave} className="app-select w-full py-1.5">
-          {field.options?.map((o: string) => <option key={o} value={o}>{o || 'Select...'}</option>)}
+          {extraSelectOptions(field.options, tempVal).map((o: string) => <option key={o} value={o}>{o || 'Select...'}</option>)}
         </select>
       ) : field.type === 'textarea' ? (
         <textarea autoFocus value={tempVal} onChange={(e) => setTempVal(e.target.value)} onBlur={handleSave} rows={2} className="app-input py-1.5 resize-none" placeholder={field.placeholder} />
@@ -193,7 +247,6 @@ function EditableCell({ field, value, onSave }: { field: any, value: any, onSave
 }
 
 const PAGE_SIZE = 25
-type QueuePreset = '' | 'mine' | 'warehouse'
 
 export default function DashboardClient({
   userId,
@@ -237,6 +290,7 @@ export default function DashboardClient({
   const [assignedTo, setAssignedTo] = useState(userId)
   const [extraForm, setExtraForm] = useState<ExtraFormState>({ ...emptyExtraFormState })
   const [showExtraFields, setShowExtraFields] = useState(false)
+  const [emailAlerts, setEmailAlerts] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [showForm, setShowForm] = useState(false)
@@ -369,9 +423,33 @@ export default function DashboardClient({
   }, [])
 
   useEffect(() => {
-    const initialQueue: QueuePreset = userRole === 'warehouse' ? 'warehouse' : ''
-    fetchPage(1, undefined, undefined, undefined, undefined, undefined, undefined, initialQueue)
-    fetchStats()
+    const restored = loadDashboardView(userId, userRole === 'warehouse' ? 'warehouse' : '')
+    setFilterFrom(restored.from)
+    setFilterTo(restored.to)
+    setFilterCategory(restored.cat)
+    setFilterMarketplace(restored.mp)
+    setFilterFault(restored.fault)
+    setFilterStatus(restored.stat)
+    setFilterQueue(restored.queue)
+    setFilterSearch(restored.search)
+    setSearchInput(restored.search)
+    setFilterMetric(restored.metric)
+    setActiveMetricKey(restored.metricKey)
+    setSortColumn(restored.sortColumn)
+    setSortDirection(restored.sortDirection)
+    sortColumnRef.current = restored.sortColumn
+    sortDirectionRef.current = restored.sortDirection
+    setCurrentPage(restored.page)
+    currentPageRef.current = restored.page
+    saveDashboardView(userId, restored)
+    fetchPage(
+      restored.page, restored.from, restored.to, restored.cat, restored.mp,
+      restored.stat, restored.fault, restored.queue, restored.search, restored.metric
+    )
+    fetchStats(
+      restored.from, restored.to, restored.cat, restored.mp,
+      restored.stat, restored.fault, restored.queue, restored.search
+    )
     fetchDropdowns()
     const channel = supabase.channel('realtime_dashboard')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, scheduleRefetch)
@@ -383,6 +461,32 @@ export default function DashboardClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase])
 
+  const persistView = (next: {
+    from: string; to: string; cat: string; mp: string; fault: string; stat: string
+    queue: QueuePreset; search: string
+    metric: MetricFilter | null
+    metricKey: string | null
+    page?: number
+    sortColumn?: DashboardSortColumn
+    sortDirection?: SortDirection
+  }) => {
+    saveDashboardView(userId, {
+      from: next.from,
+      to: next.to,
+      cat: next.cat,
+      mp: next.mp,
+      fault: next.fault,
+      stat: next.stat,
+      queue: next.queue,
+      search: next.search,
+      page: next.page ?? currentPageRef.current,
+      sortColumn: next.sortColumn ?? sortColumnRef.current,
+      sortDirection: next.sortDirection ?? sortDirectionRef.current,
+      metric: next.metric,
+      metricKey: next.metricKey,
+    })
+  }
+
   const applyFilter = (
     from: string, to: string, cat: string, mp: string, stat: string, fault: string,
     queue: QueuePreset = filterQueue, search: string = filterSearch,
@@ -390,16 +494,17 @@ export default function DashboardClient({
     metricKey: string | null = activeMetricKey,
     clearMetricHighlight = false
   ) => {
+    const nextMetricKey = clearMetricHighlight ? null : metricKey
     setFilterFrom(from); setFilterTo(to); setFilterCategory(cat)
     setFilterMarketplace(mp); setFilterFault(fault); setFilterStatus(stat)
     setFilterQueue(queue); setFilterSearch(search)
     setFilterMetric(metric)
-    if (clearMetricHighlight) {
-      setActiveMetricKey(null)
-    } else {
-      setActiveMetricKey(metricKey)
-    }
+    setActiveMetricKey(nextMetricKey)
     setCurrentPage(1); currentPageRef.current = 1
+    persistView({
+      from, to, cat, mp, fault, stat: stat, queue, search,
+      metric, metricKey: nextMetricKey, page: 1,
+    })
     fetchPage(1, from, to, cat, mp, stat, fault, queue, search, metric)
     fetchStats(from, to, cat, mp, stat, fault, queue, search)
   }
@@ -460,7 +565,17 @@ export default function DashboardClient({
 
   const hasActiveFilters = !!(filterFrom || filterTo || filterCategory || filterMarketplace || filterFault || filterStatus || filterQueue || filterSearch || filterMetric)
   const isSearchActive = filterSearch.trim().length > 0
-  const handlePageChange = (page: number) => { setCurrentPage(page); currentPageRef.current = page; fetchPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page)
+    currentPageRef.current = page
+    persistView({
+      from: filterFrom, to: filterTo, cat: filterCategory, mp: filterMarketplace,
+      fault: filterFault, stat: filterStatus, queue: filterQueue, search: filterSearch,
+      metric: filterMetric, metricKey: activeMetricKey, page,
+    })
+    fetchPage(page)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const handleSort = (column: DashboardSortColumn) => {
     const nextDir = nextSortDirection(sortColumn, sortDirection, column)
@@ -470,6 +585,12 @@ export default function DashboardClient({
     sortDirectionRef.current = nextDir
     setCurrentPage(1)
     currentPageRef.current = 1
+    persistView({
+      from: filterFrom, to: filterTo, cat: filterCategory, mp: filterMarketplace,
+      fault: filterFault, stat: filterStatus, queue: filterQueue, search: filterSearch,
+      metric: filterMetric, metricKey: activeMetricKey, page: 1,
+      sortColumn: column, sortDirection: nextDir,
+    })
     fetchPage(1)
   }
 
@@ -489,7 +610,17 @@ export default function DashboardClient({
     setIsSubmitting(false)
     if (error) { alert('Could not save the incident. Please try again.'); return }
 
-    setTitle(''); setOrderNumber(''); setAssignedTo(userId); setExtraForm({ ...emptyExtraFormState }); setShowExtraFields(false); setShowForm(false)
+    if (emailAlerts && inserted?.id) {
+      const { error: alertError } = await supabase
+        .from('incidents')
+        .update({ email_alerts: true })
+        .eq('id', inserted.id)
+      if (alertError) {
+        alert('Incident saved, but email alerts could not be turned on. Add the email_alerts column in Supabase, then toggle it on the case page.')
+      }
+    }
+
+    setTitle(''); setOrderNumber(''); setAssignedTo(userId); setExtraForm({ ...emptyExtraFormState }); setShowExtraFields(false); setEmailAlerts(false); setShowForm(false)
   }
 
   const handleAddMarketplace = async (name: string) => { const { error } = await supabase.from('marketplaces').insert([{ name }]); if (!error) { setMarketplace(name); setIsAddingMp(false) } else alert('Marketplace already exists.') }
@@ -516,6 +647,11 @@ export default function DashboardClient({
   const updateStatus = async (id: string, newStatus: string) => {
     const inc = incidents.find(i => i.id === id)
     if (!inc || inc.status === newStatus) return
+    const blocked = resolveStatusBlockReason(newStatus, inc)
+    if (blocked) {
+      alert(blocked)
+      return
+    }
     const patch = statusChangePatch(newStatus, {
       resolved_at: (inc as Incident & { resolved_at?: string | null })?.resolved_at,
       warehouse_status: inc?.warehouse_status,
@@ -877,13 +1013,13 @@ export default function DashboardClient({
                   {showExtraFields && (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
                       {incidentExtraFields.map(field => (
-                        <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2 lg:col-span-4' : ''}>
+                        <div key={field.key} className={extraFieldFormClass(field)}>
                           <label className="app-label">{field.label}</label>
                           {field.type === 'textarea' ? (
                             <textarea value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} placeholder={(field as any).placeholder} rows={2} className="app-input resize-y" />
                           ) : field.type === 'select' ? (
                             <select value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} className="app-select w-full">
-                              {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                              {extraSelectOptions((field as any).options, extraForm[field.key as ExtraFieldKey]).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
                             </select>
                           ) : (
                             <input type={field.type === 'money' ? 'number' : field.type} step={field.type === 'money' ? '0.01' : undefined} value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} placeholder={(field as any).placeholder} className="app-input" />
@@ -893,6 +1029,21 @@ export default function DashboardClient({
                     </div>
                   )}
                 </div>
+
+                <label className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={emailAlerts}
+                    onChange={(e) => setEmailAlerts(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-blue-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-zinc-900">Email alerts</span>
+                    <span className="block text-xs text-zinc-600 mt-0.5">
+                      Off by default. Turn on only for important cases so @mentions send email.
+                    </span>
+                  </span>
+                </label>
 
                 <div className="flex justify-end gap-2 pt-4 border-t border-zinc-100">
                   <button type="button" onClick={() => setShowForm(false)} className="app-btn-secondary">Cancel</button>
@@ -1021,6 +1172,7 @@ export default function DashboardClient({
                 ) :
                 incidents.map(inc => {
                   const sm = statusMeta(inc.status)
+                  const resolveMissing = inc.status === 'Resolved' ? [] : missingResolveFields(inc)
                   return (
                     <tr key={inc.id} onClick={() => router.push(`/incidents/${inc.id}`)} className="group hover:bg-blue-50/80 transition-colors cursor-pointer">
                       <td className="sticky left-0 z-20 bg-white group-hover:bg-blue-50/80 transition-colors px-4 py-3 w-[240px] min-w-[240px] align-top"><p className="font-semibold text-zinc-900 text-sm leading-snug line-clamp-2">{inc.title}</p></td>
@@ -1060,7 +1212,12 @@ export default function DashboardClient({
                         )}
                       </td>
 
-                      <td className="sticky left-[360px] z-20 bg-white group-hover:bg-blue-50/80 transition-colors px-4 py-3 w-[140px] min-w-[140px] align-top border-r border-zinc-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.06)]"><span className="font-mono text-xs font-semibold bg-zinc-100 text-zinc-800 px-2 py-1 rounded-md border border-zinc-200">#{inc.order_number}</span></td>
+                      <td
+                        className="sticky left-[360px] z-20 bg-white group-hover:bg-blue-50/80 transition-colors px-4 py-3 w-[140px] min-w-[140px] align-top border-r border-zinc-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.06)]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <OrderNumberCell orderNumber={inc.order_number} />
+                      </td>
                       
                       <td className={dashboardCoreCols.date.td}>{formatDateOnly(inc.complaint_date)}</td>
                       <td className={dashboardCoreCols.category.td}>
@@ -1103,7 +1260,19 @@ export default function DashboardClient({
                             <span className={`w-2 h-2 rounded-full shrink-0 ${sm.dot}`} />
                             <span className="truncate">{inc.status}</span>
                           </div>
-                          <select value={inc.status} onChange={(e) => { e.stopPropagation(); updateStatus(inc.id, e.target.value) }} onClick={(e)=>e.stopPropagation()} className="absolute inset-0 opacity-0 w-full cursor-pointer">{STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}</select>
+                          <select
+                            value={inc.status}
+                            onChange={(e) => { e.stopPropagation(); updateStatus(inc.id, e.target.value) }}
+                            onClick={(e)=>e.stopPropagation()}
+                            title={
+                              resolveMissing.length
+                                ? `Fill ${resolveMissing.join(', ')} before marking as Resolved.`
+                                : undefined
+                            }
+                            className="absolute inset-0 opacity-0 w-full cursor-pointer"
+                          >
+                            {STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
                         </div>
                       </td>
                       <td className={extraFieldCellClass(actionTableField.tableClass)}>

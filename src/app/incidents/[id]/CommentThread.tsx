@@ -6,11 +6,12 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '../../../utils/supabase/client'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue, formatDateOnly,
+  extraFieldFormClass, extraSelectOptions,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../../../lib/incident-extra-fields'
 import {
   STATUS_VALUES, WAITING_ON_WAREHOUSE, statusMeta, statusChangePatch, categoryRingStyle,
-  canDeleteIncidents,
+  canDeleteIncidents, resolveStatusBlockReason, missingResolveFields, isEmailAlertsEnabled,
   type UserRole,
 } from '../../../lib/incident-status'
 import { deleteIncident } from '../../../lib/delete-incident'
@@ -21,6 +22,7 @@ import { CsNotifyModal } from '../../../components/CsNotifyModal'
 import { CommentBody } from '../../../components/CommentBody'
 import { MentionTextarea } from '../../../components/MentionTextarea'
 import type { CsNotifyTemplateId } from '../../../lib/cs-notify-templates'
+import { getDashboardPath } from '../../../lib/dashboard-view-state'
 
 type Attachment = AttachmentItem
 type Comment = { id: string; comment_text: string; created_at: string; user_id: string; profiles: { full_name: string; email: string } }
@@ -28,6 +30,7 @@ type Incident = {
   id: string; title: string; status: string; category: string; marketplace: string;
   order_number: string; complaint_date: string; created_at: string; assigned_to: string | null;
   resolved_at?: string | null; warehouse_requested_at?: string | null;
+  email_alerts?: boolean | null;
   profiles: { full_name: string; email: string } | null
 } & IncidentExtraDbFields
 
@@ -69,6 +72,11 @@ export default function CommentThread({
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const supabase = createClient()
   const router = useRouter()
+  const [dashboardHref, setDashboardHref] = useState('/')
+
+  useEffect(() => {
+    setDashboardHref(getDashboardPath(currentUserId, userRole === 'warehouse' ? 'warehouse' : ''))
+  }, [currentUserId, userRole])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [comments.length])
 
@@ -134,7 +142,7 @@ export default function CommentThread({
       window.alert(error ?? 'Could not delete this case. Please try again.')
       return
     }
-    router.push('/')
+    router.push(dashboardHref)
     router.refresh()
   }
 
@@ -183,6 +191,11 @@ export default function CommentThread({
 
   const handleStatusChange = async (newStatus: string) => {
     if (!incident || incident.status === newStatus) return
+    const blocked = resolveStatusBlockReason(newStatus, incident)
+    if (blocked) {
+      window.alert(blocked)
+      return
+    }
     const patch = statusChangePatch(newStatus, {
       resolved_at: incident.resolved_at,
       warehouse_status: incident.warehouse_status,
@@ -283,6 +296,22 @@ export default function CommentThread({
     await supabase.from('incidents').update({ assigned_to: newAssigneeId || null, updated_at: new Date().toISOString() }).eq('id', incidentId)
   }
 
+  const handleEmailAlertsChange = async (enabled: boolean) => {
+    if (!incident) return
+    const prev = incident.email_alerts
+    setIncident({ ...incident, email_alerts: enabled })
+    const { error } = await supabase
+      .from('incidents')
+      .update({ email_alerts: enabled, updated_at: new Date().toISOString() })
+      .eq('id', incidentId)
+    if (error) {
+      setIncident({ ...incident, email_alerts: prev })
+      window.alert(
+        'Could not update email alerts. Add this column in Supabase SQL Editor first:\n\nalter table public.incidents add column if not exists email_alerts boolean not null default false;'
+      )
+    }
+  }
+
   const startEditing = () => {
     if (!incident) return
     setEditTitle(incident.title); setEditOrderNumber(incident.order_number || ''); setEditComplaintDate(incident.complaint_date || ''); setEditCategory(incident.category || ''); setEditMarketplace(incident.marketplace || '');
@@ -311,6 +340,8 @@ export default function CommentThread({
   }
 
   const sm = statusMeta(incident.status)
+  const resolveMissing = incident.status === 'Resolved' ? [] : missingResolveFields(incident)
+  const emailAlertsOn = isEmailAlertsEnabled(incident.email_alerts)
   const waitingOnWarehouse = incident.status === WAITING_ON_WAREHOUSE
   const canRequestWarehouse = userRole !== 'warehouse' && !waitingOnWarehouse && sm.isOpen
   const showDeleteCase = canDeleteIncidents(userRole)
@@ -352,7 +383,7 @@ export default function CommentThread({
         />
       )}
       <div className="app-container max-w-5xl">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-600 hover:text-blue-700 transition mb-6">
+        <Link href={dashboardHref} className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-600 hover:text-blue-700 transition mb-6">
           ← Back to dashboard
         </Link>
 
@@ -413,7 +444,7 @@ export default function CommentThread({
                         const val = incident[field.key as keyof IncidentExtraDbFields]
                         if (val === null || val === undefined || val === '') return null
                         return (
-                          <div key={field.key} className={field.type === 'textarea' ? 'col-span-2 md:col-span-3' : ''}>
+                          <div key={field.key} className={field.type === 'textarea' && !field.formClass ? 'col-span-2 md:col-span-3' : ''}>
                             <p className="app-label mb-1">{field.label}</p>
                             <p className="text-sm text-zinc-900 whitespace-pre-wrap leading-relaxed bg-zinc-50 border border-zinc-200 px-3 py-2 rounded-lg">{formatExtraValue(val, field.type)}</p>
                           </div>
@@ -437,12 +468,12 @@ export default function CommentThread({
                   
                   <div className="border-t border-zinc-100 pt-4 mt-2">
                     <h3 className="text-sm font-semibold text-zinc-800 mb-3">Additional details</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                       {incidentExtraFields.map(field => {
                         if (field.key === 'province') return null
                         if (field.key === 'customer_address') {
                           return (
-                            <div key="address-block" className="md:col-span-2">
+                            <div key="address-block" className="md:col-span-2 lg:col-span-4">
                               <label className="app-label">Address</label>
                               <textarea
                                 value={editExtraForm.customer_address}
@@ -462,13 +493,13 @@ export default function CommentThread({
                           )
                         }
                         return (
-                          <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2' : ''}>
+                          <div key={field.key} className={extraFieldFormClass(field)}>
                             <label className="app-label">{field.label}</label>
                             {field.type === 'textarea' ? (
                               <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="app-input resize-y" placeholder={(field as any).placeholder} />
                             ) : field.type === 'select' ? (
                               <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="app-select w-full">
-                                {(field as any).options?.map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                                {extraSelectOptions((field as any).options, editExtraForm[field.key as ExtraFieldKey]).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
                               </select>
                             ) : (
                               <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="app-input" />
@@ -497,8 +528,21 @@ export default function CommentThread({
                     onChange={(e) => handleStatusChange(e.target.value)}
                     className={`w-full text-sm font-bold px-4 py-2.5 rounded-xl border-2 focus:outline-none focus:ring-2 focus:ring-blue-300 ${sm.select}`}
                   >
-                    {STATUS_VALUES.map(s => <option key={s} value={s}>{s}</option>)}
+                    {STATUS_VALUES.map(s => (
+                      <option
+                        key={s}
+                        value={s}
+                        disabled={s === 'Resolved' && resolveMissing.length > 0}
+                      >
+                        {s}
+                      </option>
+                    ))}
                   </select>
+                  {resolveMissing.length > 0 && (
+                    <p className="mt-2 text-xs text-zinc-600 leading-relaxed">
+                      To mark as Resolved, fill {resolveMissing.join(', ')} first.
+                    </p>
+                  )}
                 </div>
                 {canRequestWarehouse && (
                   <button
@@ -524,6 +568,42 @@ export default function CommentThread({
                     <select value={incident.assigned_to || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="app-select w-full"><option value="">Unassigned</option>{agents.map(a => <option key={a.id} value={a.id}>{a.full_name || a.email}</option>)}</select>
                   </div>
                 )}
+                <div>
+                  <label className="app-label">Email alerts</label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={emailAlertsOn}
+                    onClick={() => void handleEmailAlertsChange(!emailAlertsOn)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                      emailAlertsOn
+                        ? 'border-blue-300 bg-blue-50'
+                        : 'border-zinc-200 bg-white'
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className={`block text-sm font-semibold ${emailAlertsOn ? 'text-blue-900' : 'text-zinc-800'}`}>
+                        {emailAlertsOn ? 'On for this case' : 'Off for this case'}
+                      </span>
+                      <span className="block text-xs text-zinc-600 mt-0.5 leading-relaxed">
+                        {emailAlertsOn
+                          ? '@mentions send email. Turn off for ordinary cases.'
+                          : 'No mention emails. Turn on for important cases.'}
+                      </span>
+                    </span>
+                    <span
+                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                        emailAlertsOn ? 'bg-blue-600' : 'bg-zinc-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-5 w-5 rounded-full bg-white shadow transition ${
+                          emailAlertsOn ? 'translate-x-5' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -651,6 +731,7 @@ export default function CommentThread({
                 members={agents}
                 currentUserId={currentUserId}
                 disabled={isSubmitting}
+                emailAlertsEnabled={emailAlertsOn}
                 placeholder="Write a comment… (type @ to mention)"
                 className="app-input w-full resize-none min-h-[44px] rounded-xl"
                 onSubmit={() => void handleSubmitComment()}

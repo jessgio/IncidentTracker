@@ -4,6 +4,7 @@ import {
   STATUS_VALUES,
   WAITING_ON_WAREHOUSE,
   statusChangePatch,
+  resolveStatusBlockReason,
 } from '../../../../../lib/incident-status'
 import { getAppOrigin } from '../../../../../lib/app-origin'
 import { isLarkConfigured, sendLarkText } from '../../../../../lib/lark'
@@ -29,7 +30,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const { data: incident, error: incError } = await supabase
       .from('incidents')
       .select(
-        'id, title, order_number, status, category, marketplace, warehouse_status, resolved_at'
+        'id, title, order_number, status, category, marketplace, warehouse_status, resolved_at, action_taken, fault_party'
       )
       .eq('id', incidentId)
       .single()
@@ -40,6 +41,24 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     if (incident.status === newStatus) {
       return NextResponse.json({ success: true, unchanged: true })
+    }
+
+    let affectedProduct = ''
+    if (newStatus === 'Resolved') {
+      const { data: productRow } = await supabase
+        .from('incidents')
+        .select('affected_product')
+        .eq('id', incidentId)
+        .maybeSingle()
+      affectedProduct = (productRow as { affected_product?: string | null } | null)?.affected_product ?? ''
+    }
+
+    const blocked = resolveStatusBlockReason(newStatus, {
+      ...incident,
+      affected_product: affectedProduct,
+    })
+    if (blocked) {
+      return NextResponse.json({ error: blocked }, { status: 400 })
     }
 
     const patch = statusChangePatch(newStatus, {

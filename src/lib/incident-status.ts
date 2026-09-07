@@ -61,6 +61,38 @@ export function canManageUserPasswords(role: UserRole | string | null | undefine
   return role === 'manager'
 }
 
+export function isEmailAlertsEnabled(value: boolean | null | undefined) {
+  return value === true
+}
+
+export const RESOLVE_REQUIRED_FIELDS = [
+  { key: 'action_taken', label: 'Action' },
+  { key: 'fault_party', label: 'Fault' },
+  { key: 'affected_product', label: 'Produk Terkendala' },
+] as const
+
+export type ResolveRequiredSnapshot = {
+  action_taken?: string | null
+  fault_party?: string | null
+  affected_product?: string | null
+}
+
+export function missingResolveFields(incident: ResolveRequiredSnapshot): string[] {
+  return RESOLVE_REQUIRED_FIELDS
+    .filter(({ key }) => !String(incident[key] ?? '').trim())
+    .map(({ label }) => label)
+}
+
+export function resolveStatusBlockReason(
+  newStatus: string,
+  incident: ResolveRequiredSnapshot
+): string | null {
+  if (newStatus !== 'Resolved') return null
+  const missing = missingResolveFields(incident)
+  if (missing.length === 0) return null
+  return `Fill ${missing.join(', ')} before marking this case as Resolved.`
+}
+
 export function statusChangePatch(
   newStatus: string,
   prev?: { resolved_at?: string | null; warehouse_status?: string | null }

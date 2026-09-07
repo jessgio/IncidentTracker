@@ -13,6 +13,7 @@ import {
 import { getAppOrigin } from '../../../../../lib/app-origin'
 import { isLarkConfigured, sendLarkInteractive } from '../../../../../lib/lark'
 import { buildCommentLarkPost, commentToLarkPlain } from '../../../../../lib/lark-messages'
+import { isEmailAlertsEnabled } from '../../../../../lib/incident-status'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -72,10 +73,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
       id => id.toLowerCase() !== user.id.toLowerCase()
     )
 
+    let emailAlerts = false
+    const { data: alertRow, error: alertError } = await supabase
+      .from('incidents')
+      .select('email_alerts')
+      .eq('id', incidentId)
+      .maybeSingle()
+    if (!alertError) {
+      emailAlerts = isEmailAlertsEnabled((alertRow as { email_alerts?: boolean | null } | null)?.email_alerts)
+    }
+
     const emailFailures: string[] = []
     let mentionsNotified = 0
 
-    if (mentionIds.length > 0 && process.env.RESEND_API_KEY) {
+    if (emailAlerts && mentionIds.length > 0 && process.env.RESEND_API_KEY) {
       const { data: recipients } = await supabase
         .from('profiles')
         .select('id, full_name, email')
@@ -121,7 +132,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           })
         )
       }
-    } else if (mentionIds.length > 0 && !process.env.RESEND_API_KEY) {
+    } else if (emailAlerts && mentionIds.length > 0 && !process.env.RESEND_API_KEY) {
       emailFailures.push('(email not configured)')
     }
 

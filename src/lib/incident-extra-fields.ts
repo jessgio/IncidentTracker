@@ -1,3 +1,5 @@
+import { actionSelectOptions } from './action-options'
+
 export type ExtraFieldType = 'text' | 'textarea' | 'date' | 'money' | 'select'
 
 export const incidentExtraFields = [
@@ -39,18 +41,7 @@ export const incidentExtraFields = [
     key: 'action_taken',
     label: 'Action',
     type: 'select',
-    options: [
-      '',
-      'Replacement',
-      'Refund',
-      'Voucher',
-      'Dana Dicairkan Ke Penjual',
-      'Retur Refund By Marketplace',
-      'Retur Replace Manual',
-      'Replace Only',
-      'Voucher Kompensasi',
-      'Other',
-    ],
+    optionsFrom: 'action_options',
     tableClass: 'min-w-[220px]',
   },
   {
@@ -145,6 +136,7 @@ export const incidentExtraFields = [
   type: ExtraFieldType
   placeholder?: string
   options?: readonly string[]
+  optionsFrom?: 'action_options'
   tableClass?: string
   formClass?: string
 }[]
@@ -253,6 +245,22 @@ export function extraSelectOptions(
   const value = current ?? ''
   if (value && !list.includes(value)) list.push(value)
   return list
+}
+
+export function optionsForExtraField(
+  field: {
+    key: string
+    type: ExtraFieldType
+    options?: readonly string[]
+    optionsFrom?: 'action_options'
+  },
+  current?: string | null,
+  live?: { actionOptions?: readonly { name: string }[] }
+) {
+  if (field.optionsFrom === 'action_options') {
+    return actionSelectOptions(live?.actionOptions, current)
+  }
+  return extraSelectOptions(field.options, current)
 }
 
 // Date-only columns (e.g. complaint_date) are stored as `YYYY-MM-DD`. Passing that

@@ -5,6 +5,7 @@ import {
   type ExtraFormState,
   type ExtraFieldKey,
 } from './incident-extra-fields'
+import { DEFAULT_ACTION_OPTIONS } from './action-options'
 import { DEFAULT_STATUS, STATUS_VALUES, resolveStatusBlockReason, type IncidentStatus } from './incident-status'
 
 export type ImportColumn = {
@@ -28,7 +29,11 @@ export const INCIDENT_IMPORT_COLUMNS: ImportColumn[] = [
     label: f.label,
     example:
       ('placeholder' in f && f.placeholder) ||
-      (f.type === 'select' && 'options' in f && f.options?.[1] ? String(f.options[1]) : ''),
+      (f.type === 'select' && 'optionsFrom' in f && f.optionsFrom === 'action_options'
+        ? DEFAULT_ACTION_OPTIONS[0]
+        : f.type === 'select' && 'options' in f && f.options?.[1]
+          ? String(f.options[1])
+          : ''),
   })),
   { key: 'status', label: 'Status', example: DEFAULT_STATUS },
 ]
@@ -303,8 +308,8 @@ export function parseImportTable(
     for (const field of incidentExtraFields) {
       const key = field.key as ExtraFieldKey
       extra[key] = record[key] ?? ''
-      if (field.type === 'select' && extra[key]) {
-        const allowed = field.options?.filter(o => o !== '') ?? []
+      if (field.type === 'select' && extra[key] && 'options' in field) {
+        const allowed = field.options.filter(o => o !== '')
         if (allowed.length && !allowed.includes(extra[key] as (typeof allowed)[number])) {
           errors.push({
             rowNumber,
@@ -396,7 +401,13 @@ export function getImportFieldGuide() {
   const statusLine = `Status (optional, default ${DEFAULT_STATUS}): ${STATUS_VALUES.join(' | ')}`
   const selectFields = incidentExtraFields
     .filter(f => f.type === 'select')
-    .map(f => `${f.label}: ${(f.options ?? []).filter(Boolean).join(' | ')}`)
+    .map(f => {
+      if ('optionsFrom' in f && f.optionsFrom === 'action_options') {
+        return `${f.label}: must match names in Manage lists → Actions`
+      }
+      const options = 'options' in f ? f.options.filter(Boolean).join(' | ') : ''
+      return `${f.label}: ${options}`
+    })
   return [
     'Required: Title, Order Number, Date (YYYY-MM-DD), Category, Marketplace.',
     'Category and Marketplace must match names in Manage lists.',

@@ -6,9 +6,13 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '../../../utils/supabase/client'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, incidentToExtraForm, formatExtraValue, formatDateOnly,
-  extraFieldFormClass, extraSelectOptions,
+  extraFieldFormClass, optionsForExtraField,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../../../lib/incident-extra-fields'
+import {
+  ACTION_OPTIONS_TABLE,
+  type ActionOption,
+} from '../../../lib/action-options'
 import {
   STATUS_VALUES, WAITING_ON_WAREHOUSE, statusMeta, statusChangePatch, categoryRingStyle,
   canDeleteIncidents, resolveStatusBlockReason, missingResolveFields, isEmailAlertsEnabled,
@@ -50,6 +54,7 @@ export default function CommentThread({
   const [agents, setAgents] = useState<Profile[]>([])
   const [categories, setCategories] = useState<{ name: string; color: string }[]>([])
   const [marketplaces, setMarketplaces] = useState<{ id: string; name: string }[]>([])
+  const [actionOptions, setActionOptions] = useState<ActionOption[]>([])
   const [attachments, setAttachments] = useState<Attachment[]>([])
   
   const [newComment, setNewComment] = useState('')
@@ -81,12 +86,13 @@ export default function CommentThread({
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [comments.length])
 
   const fetchAll = useCallback(async () => {
-    const [incRes, commentRes, agentRes, catRes, mpRes, attRes] = await Promise.all([
+    const [incRes, commentRes, agentRes, catRes, mpRes, actionRes, attRes] = await Promise.all([
       supabase.from('incidents').select('*, profiles(full_name, email)').eq('id', incidentId).single(),
       supabase.from('comments').select('*, profiles(full_name, email)').eq('incident_id', incidentId).order('created_at', { ascending: true }),
       supabase.from('profiles').select('id, full_name, email, role'),
       supabase.from('categories').select('name, color').order('name'),
       supabase.from('marketplaces').select('id, name').order('name'),
+      supabase.from(ACTION_OPTIONS_TABLE).select('id, name').order('name'),
       supabase.from('attachments').select('id, file_name, file_type, file_url, created_at').eq('incident_id', incidentId).order('created_at', { ascending: true }),
     ])
     if (incRes.data) setIncident(incRes.data)
@@ -94,6 +100,7 @@ export default function CommentThread({
     if (agentRes.data) setAgents(agentRes.data)
     if (catRes.data) setCategories(catRes.data)
     if (mpRes.data) setMarketplaces(mpRes.data)
+    if (!actionRes.error && actionRes.data) setActionOptions(actionRes.data)
     if (attRes.data) setAttachments(attRes.data)
   }, [supabase, incidentId])
 
@@ -499,7 +506,7 @@ export default function CommentThread({
                               <textarea value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} rows={2} className="app-input resize-y" placeholder={(field as any).placeholder} />
                             ) : field.type === 'select' ? (
                               <select value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} className="app-select w-full">
-                                {extraSelectOptions((field as any).options, editExtraForm[field.key as ExtraFieldKey]).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                                {optionsForExtraField(field, editExtraForm[field.key as ExtraFieldKey], { actionOptions }).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
                               </select>
                             ) : (
                               <input type={field.type === 'money' ? 'number' : field.type} step={field.type==='money'?'0.01':undefined} value={editExtraForm[field.key as ExtraFieldKey]} onChange={(e) => setEditExtraForm(p=>({ ...p, [field.key]: e.target.value }))} placeholder={(field as any).placeholder} className="app-input" />

@@ -9,10 +9,15 @@ import { ManageUsersModal } from './ManageUsersModal'
 import DashboardMetrics from './DashboardMetrics'
 import {
   incidentExtraFields, emptyExtraFormState, extraFormToDbPayload, formatExtraValue, formatDateOnly, csvEscape,
-  extraFieldFormClass, extraSelectOptions,
+  extraFieldFormClass, optionsForExtraField,
   FAULT_PARTY_VALUES,
   type ExtraFormState, type IncidentExtraDbFields, type ExtraFieldKey
 } from '../lib/incident-extra-fields'
+import {
+  ACTION_OPTIONS_TABLE,
+  actionOptionNames,
+  type ActionOption,
+} from '../lib/action-options'
 import {
   STATUS_VALUES, DEFAULT_STATUS, WAITING_ON_WAREHOUSE,
   DASHBOARD_TABLE_EXTRA_KEYS, statusMeta, statusChangePatch,
@@ -212,7 +217,17 @@ function OrderNumberCell({ orderNumber }: { orderNumber: string }) {
   )
 }
 
-function EditableCell({ field, value, onSave }: { field: any, value: any, onSave: (val: string) => void }) {
+function EditableCell({
+  field,
+  value,
+  onSave,
+  actionOptions,
+}: {
+  field: any
+  value: any
+  onSave: (val: string) => void
+  actionOptions?: ActionOption[]
+}) {
   const [isEditing, setIsEditing] = useState(false)
   const [tempVal, setTempVal] = useState('')
   useEffect(() => { setTempVal(value ?? '') }, [value])
@@ -235,7 +250,7 @@ function EditableCell({ field, value, onSave }: { field: any, value: any, onSave
     <div onClick={(e) => e.stopPropagation()} className="relative w-full">
       {field.type === 'select' ? (
         <select autoFocus value={tempVal} onChange={(e) => setTempVal(e.target.value)} onBlur={handleSave} className="app-select w-full py-1.5">
-          {extraSelectOptions(field.options, tempVal).map((o: string) => <option key={o} value={o}>{o || 'Select...'}</option>)}
+          {optionsForExtraField(field, tempVal, { actionOptions }).map((o: string) => <option key={o} value={o}>{o || 'Select...'}</option>)}
         </select>
       ) : field.type === 'textarea' ? (
         <textarea autoFocus value={tempVal} onChange={(e) => setTempVal(e.target.value)} onBlur={handleSave} rows={2} className="app-input py-1.5 resize-none" placeholder={field.placeholder} />
@@ -260,6 +275,7 @@ export default function DashboardClient({
   const [incidents, setIncidents] = useState<Incident[]>([])
   const [marketplaces, setMarketplaces] = useState<Marketplace[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [actionOptions, setActionOptions] = useState<ActionOption[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
   const [stats, setStats] = useState<DashboardStats>(EMPTY_STATS)
 
@@ -296,6 +312,7 @@ export default function DashboardClient({
   const [showForm, setShowForm] = useState(false)
   const [isAddingMp, setIsAddingMp] = useState(false)
   const [isAddingCat, setIsAddingCat] = useState(false)
+  const [isAddingAction, setIsAddingAction] = useState(false)
   const [showManageLists, setShowManageLists] = useState(false)
   const [showManageUsers, setShowManageUsers] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -396,6 +413,8 @@ export default function DashboardClient({
   const fetchDropdowns = useCallback(async () => {
     const { data: mpData } = await supabase.from('marketplaces').select('*').order('name'); if (mpData) { setMarketplaces(mpData); if (mpData.length > 0 && !marketplace) setMarketplace(mpData[0].name) }
     const { data: catData } = await supabase.from('categories').select('*').order('name'); if (catData) { setCategories(catData); if (catData.length > 0 && !category) setCategory(catData[0].name) }
+    const { data: actionData, error: actionError } = await supabase.from(ACTION_OPTIONS_TABLE).select('id, name').order('name')
+    if (!actionError && actionData) setActionOptions(actionData)
     const { data: agentData } = await supabase.from('profiles').select('id, full_name, email').order('full_name')
     if (agentData) setAgents(agentData)
   }, [supabase])
@@ -455,6 +474,7 @@ export default function DashboardClient({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'incidents' }, scheduleRefetch)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marketplaces' }, () => fetchDropdownsRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => fetchDropdownsRef.current())
+      .on('postgres_changes', { event: '*', schema: 'public', table: ACTION_OPTIONS_TABLE }, () => fetchDropdownsRef.current())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments' }, () => fetchPageRef.current(currentPageRef.current))
       .subscribe()
     return () => { if (refetchTimer.current) clearTimeout(refetchTimer.current); supabase.removeChannel(channel) }
@@ -625,6 +645,22 @@ export default function DashboardClient({
 
   const handleAddMarketplace = async (name: string) => { const { error } = await supabase.from('marketplaces').insert([{ name }]); if (!error) { setMarketplace(name); setIsAddingMp(false) } else alert('Marketplace already exists.') }
   const handleAddCategory = async (name: string, color?: string) => { const { error } = await supabase.from('categories').insert([{ name, color: color || 'slate' }]); if (!error) { setCategory(name); setIsAddingCat(false) } else alert('Category already exists.') }
+  const handleAddAction = async (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const { data, error } = await supabase.from(ACTION_OPTIONS_TABLE).insert([{ name: trimmed }]).select('id, name').single()
+    if (error) {
+      alert(error.code === '42P01'
+        ? 'Action list is not set up yet. Run the action_options SQL in Supabase, then try again.'
+        : 'That action already exists.')
+      return
+    }
+    if (data) {
+      setActionOptions(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      updateExtraForm('action_taken', data.name)
+    }
+    setIsAddingAction(false)
+  }
   
   const handleAssigneeChange = async (incidentId: string, assigneeId: string) => {
     const agent = agents.find(a => a.id === assigneeId)
@@ -759,6 +795,13 @@ export default function DashboardClient({
         }
         if (!mpNames.has(row.marketplace)) {
           listErrors.push(`Row ${row.rowNumber}: unknown marketplace "${row.marketplace}". Add it under Manage lists.`)
+        }
+        const action = row.extra.action_taken
+        if (action) {
+          const allowed = new Set(actionOptionNames(actionOptions))
+          if (!allowed.has(action)) {
+            listErrors.push(`Row ${row.rowNumber}: unknown Action "${action}". Add it under Manage lists → Actions.`)
+          }
         }
       }
 
@@ -1017,9 +1060,20 @@ export default function DashboardClient({
                           <label className="app-label">{field.label}</label>
                           {field.type === 'textarea' ? (
                             <textarea value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} placeholder={(field as any).placeholder} rows={2} className="app-input resize-y" />
+                          ) : field.type === 'select' && field.key === 'action_taken' ? (
+                            isAddingAction ? (
+                              <InlineAdd onCancel={() => setIsAddingAction(false)} onAdd={handleAddAction} placeholder="New action" />
+                            ) : (
+                              <div className="flex gap-1.5">
+                                <select value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} className="app-select w-full">
+                                  {optionsForExtraField(field, extraForm[field.key as ExtraFieldKey], { actionOptions }).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                                </select>
+                                <button type="button" onClick={() => setIsAddingAction(true)} className="app-btn-secondary shrink-0 px-3" aria-label="Add action">+</button>
+                              </div>
+                            )
                           ) : field.type === 'select' ? (
                             <select value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} className="app-select w-full">
-                              {extraSelectOptions((field as any).options, extraForm[field.key as ExtraFieldKey]).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
+                              {optionsForExtraField(field, extraForm[field.key as ExtraFieldKey], { actionOptions }).map((o: string) => <option key={o} value={o}>{o || 'Select…'}</option>)}
                             </select>
                           ) : (
                             <input type={field.type === 'money' ? 'number' : field.type} step={field.type === 'money' ? '0.01' : undefined} value={extraForm[field.key as ExtraFieldKey]} onChange={(e) => updateExtraForm(field.key as ExtraFieldKey, e.target.value)} placeholder={(field as any).placeholder} className="app-input" />
@@ -1280,6 +1334,7 @@ export default function DashboardClient({
                           field={actionTableField}
                           value={inc.action_taken}
                           onSave={(newVal) => updateIncidentField(inc.id, 'action_taken', newVal)}
+                          actionOptions={actionOptions}
                         />
                       </td>
 
@@ -1287,7 +1342,7 @@ export default function DashboardClient({
                         const value = inc[field.key as keyof IncidentExtraDbFields]
                         return (
                           <td key={field.key} className={extraFieldCellClass(field.tableClass)}>
-                            <EditableCell field={field} value={value} onSave={(newVal) => updateIncidentField(inc.id, field.key, newVal)} />
+                            <EditableCell field={field} value={value} onSave={(newVal) => updateIncidentField(inc.id, field.key, newVal)} actionOptions={actionOptions} />
                           </td>
                         )
                       })}
@@ -1326,7 +1381,7 @@ export default function DashboardClient({
         </div>
         </div>
 
-        {showManageLists && <ManageListsModal onClose={() => setShowManageLists(false)} />}
+        {showManageLists && <ManageListsModal onClose={() => { setShowManageLists(false); void fetchDropdowns() }} />}
         {showManageUsers && <ManageUsersModal onClose={() => setShowManageUsers(false)} />}
       </div>
     </div>
